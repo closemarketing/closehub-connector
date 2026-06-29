@@ -1,0 +1,46 @@
+# General
+.DS_Store
+composer.json
+composer.lock
+
+# Version Control
+.github
+.gitignore
+.distignore
+.editorconfig
+.git
+.gitignore
+.wordpress-playground
+
+# Develop
+node_modules/
+package.json
+package-lock.json
+
+# WordPress
+.wordpress-org
+
+# Testing
+.travis.yml
+circle.yml
+.phpcs.xml.dist
+.phpunit.result.cache
+phpunit.xml.dist
+phpcs.xml.dist
+.phpcs.xml.dist
+phpstan.neon.dist
+tests/
+bin/
+.wp-env.json
+
+# AI
+AGENTS.md
+CLAUDE.md
+.claude/
+.cursor/
+docs/
+
+
+# Lang
+*.pot
+*.po

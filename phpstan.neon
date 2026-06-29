@@ -1,0 +1,11 @@
+parameters:
+    level: 5
+    paths:
+        - closehub-connector.php
+        - includes
+    bootstrapFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
+        - vendor/php-stubs/gravity-forms-stubs/gravity-forms-stubs.php
+    excludePaths:
+        - vendor

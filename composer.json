@@ -1,0 +1,17 @@
+{
+    "name": "closemarketing/closehub-connector",
+    "description": "Connect your WordPress site to CloseHub with a single API key.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "php-stubs/wordpress-stubs": "^6.7",
+        "php-stubs/gravity-forms-stubs": "^2.8",
+        "php-stubs/woocommerce-stubs": "^9.0"
+    },
+    "config": {
+        "allow-plugins": {}
+    }
+}

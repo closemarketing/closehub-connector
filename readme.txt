@@ -8,7 +8,7 @@ Stable tag: 1.0.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Connect your WordPress site to CloseHub with a single API key — no separate WooCommerce keys, Application Passwords, or Gravity Forms credentials needed.
+Connect your WordPress site to CloseHub with a single API key in order to send statistics.
 
 == Description ==
 

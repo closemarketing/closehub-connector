@@ -9,7 +9,7 @@
     "require-dev": {
         "php-stubs/wordpress-stubs": "^6.7",
         "php-stubs/gravity-forms-stubs": "^2.8",
-        "php-stubs/woocommerce-stubs": "^9.0"
+        "php-stubs/woocommerce-stubs": "^10.9"
     },
     "config": {
         "allow-plugins": {}

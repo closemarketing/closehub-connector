@@ -12,38 +12,34 @@ class CloseHub_REST_API {
 
 	public function register_routes(): void {
 		// ── Posts ──────────────────────────────────────────────────────────────
-		$post_args = [
-			'title'   => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
-			'content' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
-			'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
-			'status'  => [
-				'required'          => false,
-				'type'              => 'string',
-				'default'           => 'publish',
-				'sanitize_callback' => 'sanitize_text_field',
-				'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
-			],
-		];
-
 		register_rest_route( self::NAMESPACE, '/posts', [
 			'methods'             => WP_REST_Server::CREATABLE,
 			'callback'            => [ $this, 'create_post' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
-			'args'                => $post_args,
+			'args'                => [
+				'title'   => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'content' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'status'  => [
+					'required'          => false,
+					'type'              => 'string',
+					'default'           => 'publish',
+					'sanitize_callback' => 'sanitize_text_field',
+					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
+				],
+			],
 		] );
 
 		// ── WooCommerce ────────────────────────────────────────────────────────
-		$orders_args = [
-			'after'  => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
-			'before' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
-			'status' => [ 'required' => false, 'type' => 'string', 'default' => 'completed,processing', 'sanitize_callback' => 'sanitize_text_field' ],
-		];
-
 		register_rest_route( self::NAMESPACE, '/woocommerce/orders', [
 			'methods'             => WP_REST_Server::READABLE,
 			'callback'            => [ $this, 'get_woocommerce_orders' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
-			'args'                => $orders_args,
+			'args'                => [
+				'after'  => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'before' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'status' => [ 'required' => false, 'type' => 'string', 'default' => 'completed,processing', 'sanitize_callback' => 'sanitize_text_field' ],
+			],
 		] );
 
 		// ── Gravity Forms ──────────────────────────────────────────────────────
@@ -53,28 +49,24 @@ class CloseHub_REST_API {
 			'permission_callback' => [ $this, 'check_api_key' ],
 		] );
 
-		$form_args = [
-			'id' => [ 'required' => true, 'type' => 'integer', 'validate_callback' => 'is_numeric' ],
-		];
-
 		register_rest_route( self::NAMESPACE, '/gravity-forms/forms/(?P<id>\d+)', [
 			'methods'             => WP_REST_Server::READABLE,
 			'callback'            => [ $this, 'get_form' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
-			'args'                => $form_args,
+			'args'                => [
+				'id' => [ 'required' => true, 'type' => 'integer', 'validate_callback' => 'is_numeric' ],
+			],
 		] );
-
-		$form_entries_args = [
-			'id'     => [ 'required' => true, 'type' => 'integer' ],
-			'after'  => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
-			'before' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
-		];
 
 		register_rest_route( self::NAMESPACE, '/gravity-forms/forms/(?P<id>\d+)/entries', [
 			'methods'             => WP_REST_Server::READABLE,
 			'callback'            => [ $this, 'get_form_entries' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
-			'args'                => $form_entries_args,
+			'args'                => [
+				'id'     => [ 'required' => true, 'type' => 'integer' ],
+				'after'  => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'before' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+			],
 		] );
 
 		// ── Ping / verify connection ───────────────────────────────────────────
@@ -83,52 +75,9 @@ class CloseHub_REST_API {
 			'callback'            => [ $this, 'ping' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
 		] );
-
-		// ── Network (multisite) ────────────────────────────────────────────────
-		if ( is_multisite() ) {
-			register_rest_route( self::NAMESPACE, '/network/ping', [
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'network_ping' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-			] );
-
-			register_rest_route( self::NAMESPACE, '/network/posts', [
-				'methods'             => WP_REST_Server::CREATABLE,
-				'callback'            => [ $this, 'network_create_post' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-				'args'                => $post_args,
-			] );
-
-			register_rest_route( self::NAMESPACE, '/network/woocommerce/orders', [
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'network_get_woocommerce_orders' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-				'args'                => $orders_args,
-			] );
-
-			register_rest_route( self::NAMESPACE, '/network/gravity-forms/forms', [
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'network_list_forms' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-			] );
-
-			register_rest_route( self::NAMESPACE, '/network/gravity-forms/forms/(?P<id>\d+)', [
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'network_get_form' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-				'args'                => $form_args,
-			] );
-
-			register_rest_route( self::NAMESPACE, '/network/gravity-forms/forms/(?P<id>\d+)/entries', [
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'network_get_form_entries' ],
-				'permission_callback' => [ $this, 'check_network_api_key' ],
-				'args'                => $form_entries_args,
-			] );
-		}
 	}
 
-	// ── Permission callbacks ───────────────────────────────────────────────────
+	// ── Permission callback ────────────────────────────────────────────────────
 
 	public function check_api_key( WP_REST_Request $request ): bool|WP_Error {
 		$key = $request->get_header( 'X-CloseHub-Key' );
@@ -141,25 +90,15 @@ class CloseHub_REST_API {
 		return true;
 	}
 
-	public function check_network_api_key( WP_REST_Request $request ): bool|WP_Error {
-		$key = $request->get_header( 'X-CloseHub-Network-Key' );
-		if ( ! $key ) {
-			$key = $request->get_param( 'closehub_network_key' );
-		}
-		if ( ! $key || ! CloseHub_API_Key::verify_network( (string) $key ) ) {
-			return new WP_Error( 'closehub_unauthorized', 'Invalid or missing network API key.', [ 'status' => 401 ] ); // phpcs:ignore
-		}
-		return true;
-	}
-
 	// ── Network helper ─────────────────────────────────────────────────────────
 
 	/**
-	 * Run a callback on every site in the network and collect the results.
-	 * Each entry always contains 'site_id' and 'url'. If $key is given, the
-	 * callback's return value is nested under that key (needed when the
-	 * value is itself a list, e.g. Gravity Forms); otherwise it is merged
-	 * into the entry. A WP_Error is added under 'error' instead.
+	 * On a multisite network, run a callback on every site and collect the
+	 * results instead of the callback's single-site return value. Each entry
+	 * always contains 'site_id' and 'url'. If $key is given, the callback's
+	 * return value is nested under that key (needed when the value is itself
+	 * a list, e.g. Gravity Forms); otherwise it is merged into the entry. A
+	 * WP_Error is added under 'error' instead.
 	 */
 	private function run_across_network( callable $callback, ?string $key = null ): array {
 		$results = [];
@@ -189,91 +128,49 @@ class CloseHub_REST_API {
 		return $results;
 	}
 
-	// ── Route callbacks (single site) ──────────────────────────────────────────
+	/**
+	 * Wrap a data builder so it runs once on the current site, or across
+	 * every site in the network (aggregated under 'sites') when multisite.
+	 */
+	private function respond( callable $data_builder, ?string $network_key = null ): WP_REST_Response|WP_Error {
+		if ( is_multisite() ) {
+			return rest_ensure_response( [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ] );
+		}
 
-	public function ping(): WP_REST_Response {
-		return rest_ensure_response( $this->get_ping_data() );
+		$result = $data_builder();
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		return rest_ensure_response( $result );
+	}
+
+	// ── Route callbacks ────────────────────────────────────────────────────────
+
+	public function ping(): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_ping_data() );
 	}
 
 	public function create_post( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = $this->create_post_data( $request );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return rest_ensure_response( $result );
+		return $this->respond( fn() => $this->create_post_data( $request ) );
 	}
 
 	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = $this->get_woocommerce_orders_data( $request );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return rest_ensure_response( $result );
+		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
 	}
 
 	public function list_forms(): WP_REST_Response|WP_Error {
-		$result = $this->list_forms_data();
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return rest_ensure_response( $result );
+		return $this->respond( fn() => $this->list_forms_data(), 'forms' );
 	}
 
 	public function get_form( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = $this->get_form_data( $request );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return rest_ensure_response( $result );
+		return $this->respond( fn() => $this->get_form_data( $request ) );
 	}
 
 	public function get_form_entries( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = $this->get_form_entries_data( $request );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return rest_ensure_response( $result );
+		return $this->respond( fn() => $this->get_form_entries_data( $request ) );
 	}
 
-	// ── Route callbacks (network) ──────────────────────────────────────────────
-
-	public function network_ping(): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->get_ping_data() ),
-		] );
-	}
-
-	public function network_create_post( WP_REST_Request $request ): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->create_post_data( $request ) ),
-		] );
-	}
-
-	public function network_get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->get_woocommerce_orders_data( $request ) ),
-		] );
-	}
-
-	public function network_list_forms(): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->list_forms_data(), 'forms' ),
-		] );
-	}
-
-	public function network_get_form( WP_REST_Request $request ): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->get_form_data( $request ) ),
-		] );
-	}
-
-	public function network_get_form_entries( WP_REST_Request $request ): WP_REST_Response {
-		return rest_ensure_response( [
-			'sites' => $this->run_across_network( fn() => $this->get_form_entries_data( $request ) ),
-		] );
-	}
-
-	// ── Data builders (shared by single-site and network callbacks) ───────────
+	// ── Data builders ───────────────────────────────────────────────────────────
 
 	private function get_ping_data(): array {
 		return [

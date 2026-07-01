@@ -22,12 +22,9 @@ define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 register_activation_hook( __FILE__, 'closehub_activate' );
 register_deactivation_hook( __FILE__, 'closehub_deactivate' );
 
-function closehub_activate( $network_wide = false ): void {
+function closehub_activate(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
 	CloseHub_API_Key::maybe_generate();
-	if ( $network_wide && is_multisite() ) {
-		CloseHub_API_Key::maybe_generate_network();
-	}
 	flush_rewrite_rules();
 }
 

@@ -40,16 +40,7 @@ WooCommerce and Gravity Forms endpoints return a clear error if those plugins ar
 
 **Multisite networks:**
 
-On a WordPress Multisite network, a **Network Admin → CloseHub** page lets you generate a single network-wide API key. Use it against the `/closehub/v1/network/` endpoints to query every site in the network in one request:
-
-* `GET /closehub/v1/network/ping`
-* `POST /closehub/v1/network/posts`
-* `GET /closehub/v1/network/woocommerce/orders`
-* `GET /closehub/v1/network/gravity-forms/forms`
-* `GET /closehub/v1/network/gravity-forms/forms/{id}`
-* `GET /closehub/v1/network/gravity-forms/forms/{id}/entries`
-
-Each network endpoint returns a `sites` array with one entry per site (`site_id`, `url`, and that site's data or an `error` message).
+On a WordPress Multisite network, the same endpoints listed above are shared by every site in the network — there is no separate namespace or key to manage. Activate the plugin network-wide and go to **Network Admin → Settings → CloseHub** to find one API key shared by the whole network. Every request to those endpoints automatically returns a `sites` array with one entry per site in the network (`site_id`, `url`, and that site's data or an `error` message), instead of a single site's result — handy when a network is used to run the same company in multiple languages.
 
 == Installation ==
 
@@ -75,15 +66,11 @@ No. Both are optional. If they are not active, those endpoints return a `503` re
 
 = How is the API key secured? =
 
-The key is stored in `wp_options` (never exposed on the frontend), transmitted only via HTTPS, and verified using constant-time comparison (`hash_equals`) to prevent timing attacks. It is never logged or included in REST responses.
+The key is stored in `wp_options` (or network-wide in `wp_sitemeta` on multisite), never exposed on the frontend, transmitted only via HTTPS, and verified using constant-time comparison (`hash_equals`) to prevent timing attacks. It is never logged or included in REST responses.
 
 = Can I use this plugin on a multisite network? =
 
-Yes. Each site keeps its own independent API key for single-site use, and network administrators can additionally generate one network-wide API key under **Network Admin → CloseHub**. The network key authenticates against the `/closehub/v1/network/` endpoints, which query every site in the network and return combined, per-site results — useful when a network is used to run the same company in multiple languages.
-
-= Can I regenerate the network API key? =
-
-Yes, from **Network Admin → CloseHub**. Regenerating it immediately invalidates the previous network key for every site in the network; per-site keys are not affected.
+Yes. When network-activated, the plugin generates one API key shared by every site in the network (managed from **Network Admin → Settings → CloseHub** instead of a per-site Settings page), and the same REST endpoints automatically query every site and return combined, per-site results. On a regular, non-multisite install, everything works exactly as a single site as described above.
 
 = Is this plugin affiliated with WooCommerce or Gravity Forms? =
 
@@ -97,9 +84,8 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = 1.1.0 =
-* Added WordPress Multisite network support.
-* New Network Admin → CloseHub page with a single network-wide API key.
-* New `/closehub/v1/network/*` endpoints (ping, posts, woocommerce/orders, gravity-forms/*) that query every site in the network and return per-site results.
+* Added WordPress Multisite network support: one API key shared across the whole network, managed from Network Admin → Settings → CloseHub.
+* On multisite, existing endpoints (ping, posts, woocommerce/orders, gravity-forms/*) now return combined results for every site in the network instead of a single site.
 
 = 1.0.1 =
 * Updated assets.

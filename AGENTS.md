@@ -47,26 +47,43 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 
 WooCommerce and Gravity Forms endpoints return `503` with a clear message if those plugins are not active.
 
+### Network (Multisite) endpoints
+
+Only registered when `is_multisite()` is true. They live under `/closehub/v1/network/` and require the `X-CloseHub-Network-Key` header (or `closehub_network_key` query param as fallback), checked by `CloseHub_REST_API::check_network_api_key()` against the network-wide key.
+
+| Method | Endpoint | Class method |
+|--------|----------|--------------|
+| GET | `/network/ping` | `network_ping()` |
+| POST | `/network/posts` | `network_create_post()` |
+| GET | `/network/woocommerce/orders` | `network_get_woocommerce_orders()` |
+| GET | `/network/gravity-forms/forms` | `network_list_forms()` |
+| GET | `/network/gravity-forms/forms/{id}` | `network_get_form()` |
+| GET | `/network/gravity-forms/forms/{id}/entries` | `network_get_form_entries()` |
+
+Each network callback delegates the actual work to the same private `*_data()` method used by its single-site counterpart (e.g. both `ping()` and `network_ping()` call `get_ping_data()`), then `run_across_network()` loops over `get_sites()`, calls `switch_to_blog()`/`restore_current_blog()`, and collects one entry per site into a top-level `sites` array (`site_id`, `url`, plus that site's data or an `error` message if the call failed on that site, e.g. WooCommerce not active). This keeps single-site responses byte-for-byte unchanged while reusing the same business logic for the network aggregation.
+
 ## Key classes
 
 ### `CloseHub_API_Key` (`includes/class-api-key.php`)
 
-Manages the single `closehub_api_key` option in `wp_options`.
+Manages the single `closehub_api_key` option in `wp_options`, plus (on multisite) a network-wide `closehub_network_api_key` in `wp_sitemeta`.
 
-- `maybe_generate()` — called on activation; only generates if no key exists yet
-- `get()` — returns current key, generates one if missing
-- `verify( $candidate )` — constant-time comparison via `hash_equals()`
-- `regenerate()` — generates a new key and overwrites the old one
+- `maybe_generate()` / `maybe_generate_network()` — called on activation; only generates if no key exists yet
+- `get()` / `get_network()` — returns current key, generates one if missing
+- `verify( $candidate )` / `verify_network( $candidate )` — constant-time comparison via `hash_equals()`
+- `regenerate()` / `regenerate_network()` — generates a new key and overwrites the old one
 
-Key format: `chk_` + 48 hex characters (`bin2hex( random_bytes( 24 ) )`).
+Key format: `chk_` + 48 hex characters (`bin2hex( random_bytes( 24 ) )`), same for both site and network keys.
 
 ### `CloseHub_REST_API` (`includes/class-rest-api.php`)
 
-Registers all routes on `rest_api_init`. Every route uses `check_api_key` as its `permission_callback`. Input is sanitized via `sanitize_callback` in the route arg definitions, not inside the callbacks.
+Registers all routes on `rest_api_init`. Single-site routes use `check_api_key` as their `permission_callback`; network routes (only registered when `is_multisite()`) use `check_network_api_key`. Input is sanitized via `sanitize_callback` in the route arg definitions, not inside the callbacks. Each route's business logic lives in a private `*_data()` method so it can be reused by both the single-site callback and the network aggregator (`run_across_network()`).
 
 ### `CloseHub_Admin` (`includes/class-admin.php`)
 
 Adds a page at **Settings → CloseHub** (`manage_options` capability required). The regenerate action uses a nonce (`closehub_regenerate_key`) and redirects with a `closehub_notice=regenerated` query param on success.
+
+On multisite, it also adds a **Network Admin → Settings → CloseHub** page (`manage_network_options` capability required) for the network-wide key, following the same nonce/redirect pattern (`closehub_regenerate_network_key` nonce, `network_admin_menu` hook).
 
 ## Conventions
 
@@ -78,11 +95,11 @@ Adds a page at **Settings → CloseHub** (`manage_options` capability required).
 
 ## Adding a new endpoint
 
-1. Add a `register_rest_route()` call inside `CloseHub_REST_API::register_routes()`.
-2. Set `'permission_callback' => [ $this, 'check_api_key' ]`.
+1. Put the business logic in a private `*_data()` method that returns `array|WP_Error`.
+2. Add a `register_rest_route()` call inside `CloseHub_REST_API::register_routes()` with `'permission_callback' => [ $this, 'check_api_key' ]`, wiring a thin public callback that calls the `*_data()` method and wraps it with `rest_ensure_response()`.
 3. Define `sanitize_callback` and `validate_callback` in the `args` array.
-4. Add the callback method to the same class.
-5. Document it in the table above and in `readme.txt` (Available Endpoints section).
+4. If the endpoint makes sense across a network (most read endpoints do), register a `/network/...` counterpart guarded by `if ( is_multisite() )`, using `check_network_api_key` and a callback that calls `run_across_network( fn() => $this->*_data( $request ) )` (pass a string key as the second argument if `*_data()` returns a plain list rather than an associative array, e.g. `list_forms_data()`).
+5. Document it in both tables above and in `readme.txt` (Available Endpoints section).
 
 ## CloseHub side (Laravel app)
 

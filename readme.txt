@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 1.0.1
+Stable tag: 1.1.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -38,6 +38,19 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 
 WooCommerce and Gravity Forms endpoints return a clear error if those plugins are not active — they are not required.
 
+**Multisite networks:**
+
+On a WordPress Multisite network, a **Network Admin → CloseHub** page lets you generate a single network-wide API key. Use it against the `/closehub/v1/network/` endpoints to query every site in the network in one request:
+
+* `GET /closehub/v1/network/ping`
+* `POST /closehub/v1/network/posts`
+* `GET /closehub/v1/network/woocommerce/orders`
+* `GET /closehub/v1/network/gravity-forms/forms`
+* `GET /closehub/v1/network/gravity-forms/forms/{id}`
+* `GET /closehub/v1/network/gravity-forms/forms/{id}/entries`
+
+Each network endpoint returns a `sites` array with one entry per site (`site_id`, `url`, and that site's data or an `error` message).
+
 == Installation ==
 
 1. Upload the `closehub-connector` folder to `/wp-content/plugins/`.
@@ -66,7 +79,11 @@ The key is stored in `wp_options` (never exposed on the frontend), transmitted o
 
 = Can I use this plugin on a multisite network? =
 
-The plugin works on individual sites within a multisite network. Each site generates and manages its own API key independently.
+Yes. Each site keeps its own independent API key for single-site use, and network administrators can additionally generate one network-wide API key under **Network Admin → CloseHub**. The network key authenticates against the `/closehub/v1/network/` endpoints, which query every site in the network and return combined, per-site results — useful when a network is used to run the same company in multiple languages.
+
+= Can I regenerate the network API key? =
+
+Yes, from **Network Admin → CloseHub**. Regenerating it immediately invalidates the previous network key for every site in the network; per-site keys are not affected.
 
 = Is this plugin affiliated with WooCommerce or Gravity Forms? =
 
@@ -78,6 +95,11 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.1.0 =
+* Added WordPress Multisite network support.
+* New Network Admin → CloseHub page with a single network-wide API key.
+* New `/closehub/v1/network/*` endpoints (ping, posts, woocommerce/orders, gravity-forms/*) that query every site in the network and return per-site results.
 
 = 1.0.1 =
 * Updated assets.

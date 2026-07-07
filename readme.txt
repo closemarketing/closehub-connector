@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -82,6 +82,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.0.3 =
+* Fixed: sites that already had an API key configured on a subsite before multisite support was added (<=1.0.1) now keep working after upgrading — the existing key is migrated to the network-wide setting instead of a new one being generated, which previously caused CloseHub requests to fail with 401.
 
 = 1.0.2 =
 * Added WordPress Multisite network support: one API key shared across the whole network, managed from Network Admin → Settings → CloseHub.

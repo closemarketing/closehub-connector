@@ -29,6 +29,7 @@ phpunit.xml.dist
 phpcs.xml.dist
 .phpcs.xml.dist
 phpstan.neon.dist
+phpstan.neon
 tests/
 bin/
 .wp-env.json

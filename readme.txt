@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 1.1.0
+Stable tag: 1.0.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -83,7 +83,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= 1.1.0 =
+= 1.0.2 =
 * Added WordPress Multisite network support: one API key shared across the whole network, managed from Network Admin → Settings → CloseHub.
 * On multisite, existing endpoints (ping, posts, woocommerce/orders, gravity-forms/*) now return combined results for every site in the network instead of a single site.
 

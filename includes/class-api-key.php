@@ -39,9 +39,30 @@ class CloseHub_API_Key {
 	 * (wp_sitemeta), so every site in the network shares the exact same
 	 * key. On a single-site install it lives in that site's wp_options,
 	 * exactly as before.
+	 *
+	 * Sites that ran <=1.0.1 on a subsite before multisite support was
+	 * added may already have a key in that subsite's wp_options. If we
+	 * find one and no network-wide key exists yet, migrate it up instead
+	 * of generating a new one — otherwise CloseHub keeps using the old
+	 * key and every request starts failing with 401 after the upgrade.
 	 */
 	private static function stored(): string {
-		return (string) ( is_multisite() ? get_site_option( self::OPTION, '' ) : get_option( self::OPTION, '' ) );
+		if ( ! is_multisite() ) {
+			return (string) get_option( self::OPTION, '' );
+		}
+
+		$network_key = (string) get_site_option( self::OPTION, '' );
+		if ( $network_key ) {
+			return $network_key;
+		}
+
+		$legacy_key = (string) get_option( self::OPTION, '' );
+		if ( $legacy_key ) {
+			update_site_option( self::OPTION, $legacy_key );
+			return $legacy_key;
+		}
+
+		return '';
 	}
 
 	private static function persist( string $key ): void {

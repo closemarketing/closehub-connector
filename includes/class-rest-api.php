@@ -63,7 +63,7 @@ class CloseHub_REST_API {
 			'callback'            => [ $this, 'get_form_entries' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
 			'args'                => [
-				'id'    => [ 'required' => true, 'type' => 'integer' ],
+				'id'     => [ 'required' => true, 'type' => 'integer' ],
 				'after'  => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				'before' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 			],
@@ -90,19 +90,99 @@ class CloseHub_REST_API {
 		return true;
 	}
 
+	// ── Network helper ─────────────────────────────────────────────────────────
+
+	/**
+	 * On a multisite network, run a callback on every site and collect the
+	 * results instead of the callback's single-site return value. Each entry
+	 * always contains 'site_id' and 'url'. If $key is given, the callback's
+	 * return value is nested under that key (needed when the value is itself
+	 * a list, e.g. Gravity Forms); otherwise it is merged into the entry. A
+	 * WP_Error is added under 'error' instead.
+	 */
+	private function run_across_network( callable $callback, ?string $key = null ): array {
+		$results = [];
+
+		foreach ( get_sites( [ 'number' => 0 ] ) as $site ) {
+			$blog_id = (int) $site->blog_id;
+			switch_to_blog( $blog_id );
+
+			$entry = [
+				'site_id' => $blog_id,
+				'url'     => get_site_url(),
+			];
+
+			$data = $callback();
+			if ( is_wp_error( $data ) ) {
+				$entry['error'] = $data->get_error_message();
+			} elseif ( null !== $key ) {
+				$entry[ $key ] = $data;
+			} else {
+				$entry += $data;
+			}
+
+			restore_current_blog();
+			$results[] = $entry;
+		}
+
+		return $results;
+	}
+
+	/**
+	 * Wrap a data builder so it runs once on the current site, or across
+	 * every site in the network (aggregated under 'sites') when multisite.
+	 */
+	private function respond( callable $data_builder, ?string $network_key = null ): WP_REST_Response|WP_Error {
+		if ( is_multisite() ) {
+			return rest_ensure_response( [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ] );
+		}
+
+		$result = $data_builder();
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		return rest_ensure_response( $result );
+	}
+
 	// ── Route callbacks ────────────────────────────────────────────────────────
 
-	public function ping(): WP_REST_Response {
-		return rest_ensure_response( [
-			'ok'      => true,
-			'site'    => get_bloginfo( 'name' ),
-			'url'     => get_site_url(),
-			'version' => get_bloginfo( 'version' ),
-			'closehub_connector' => CLOSEHUB_VERSION,
-		] );
+	public function ping(): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_ping_data() );
 	}
 
 	public function create_post( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->create_post_data( $request ) );
+	}
+
+	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
+	}
+
+	public function list_forms(): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->list_forms_data(), 'forms' );
+	}
+
+	public function get_form( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_form_data( $request ) );
+	}
+
+	public function get_form_entries( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_form_entries_data( $request ) );
+	}
+
+	// ── Data builders ───────────────────────────────────────────────────────────
+
+	private function get_ping_data(): array {
+		return [
+			'ok'                 => true,
+			'site'               => get_bloginfo( 'name' ),
+			'url'                => get_site_url(),
+			'version'            => get_bloginfo( 'version' ),
+			'closehub_connector' => CLOSEHUB_VERSION,
+		];
+	}
+
+	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
 		$post_id = wp_insert_post( [
 			'post_title'   => $request->get_param( 'title' ),
 			'post_content' => $request->get_param( 'content' ),
@@ -115,13 +195,13 @@ class CloseHub_REST_API {
 			return $post_id;
 		}
 
-		return rest_ensure_response( [
+		return [
 			'id'   => $post_id,
 			'link' => get_permalink( $post_id ),
-		] );
+		];
 	}
 
-	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
 		if ( ! function_exists( 'wc_get_orders' ) ) {
 			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
 		}
@@ -132,11 +212,11 @@ class CloseHub_REST_API {
 		);
 
 		$orders = wc_get_orders( [
-			'status'       => $statuses,
-			'date_after'   => $request->get_param( 'after' ),
-			'date_before'  => $request->get_param( 'before' ),
-			'limit'        => -1,
-			'return'       => 'objects',
+			'status'      => $statuses,
+			'date_after'  => $request->get_param( 'after' ),
+			'date_before' => $request->get_param( 'before' ),
+			'limit'       => -1,
+			'return'      => 'objects',
 		] );
 
 		$total_sales = 0.0;
@@ -154,15 +234,15 @@ class CloseHub_REST_API {
 
 		$count = count( $items );
 
-		return rest_ensure_response( [
+		return [
 			'orders_count'  => $count,
 			'total_sales'   => round( $total_sales, 2 ),
 			'average_order' => $count > 0 ? round( $total_sales / $count, 2 ) : 0.0,
 			'orders'        => $items,
-		] );
+		];
 	}
 
-	public function list_forms(): WP_REST_Response|WP_Error {
+	private function list_forms_data(): array|WP_Error {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}
@@ -175,10 +255,10 @@ class CloseHub_REST_API {
 			'entries'   => (int) GFAPI::count_entries( $f['id'] ),
 		], $forms );
 
-		return rest_ensure_response( array_values( $data ) );
+		return array_values( $data );
 	}
 
-	public function get_form( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	private function get_form_data( WP_REST_Request $request ): array|WP_Error {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}
@@ -193,22 +273,22 @@ class CloseHub_REST_API {
 		$entries    = GFAPI::get_entries( $form_id, [], [ 'direction' => 'DESC', 'key' => 'date_created' ], [ 'offset' => 0, 'page_size' => 1 ] );
 		$last_entry = ! empty( $entries ) ? ( $entries[0]['date_created'] ?? null ) : null;
 
-		return rest_ensure_response( [
+		return [
 			'id'         => (string) $form['id'],
 			'title'      => $form['title'],
 			'is_active'  => (bool) $form['is_active'],
 			'entries'    => (int) GFAPI::count_entries( $form_id ),
 			'last_entry' => $last_entry,
-		] );
+		];
 	}
 
-	public function get_form_entries( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	private function get_form_entries_data( WP_REST_Request $request ): array|WP_Error {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}
 
-		$form_id    = (int) $request->get_param( 'id' );
-		$search     = [];
+		$form_id = (int) $request->get_param( 'id' );
+		$search  = [];
 
 		if ( $request->get_param( 'after' ) ) {
 			$search['start_date'] = sanitize_text_field( $request->get_param( 'after' ) );
@@ -219,9 +299,9 @@ class CloseHub_REST_API {
 
 		$count = GFAPI::count_entries( $form_id, $search );
 
-		return rest_ensure_response( [
+		return [
 			'form_id'     => $form_id,
 			'total_count' => (int) $count,
-		] );
+		];
 	}
 }

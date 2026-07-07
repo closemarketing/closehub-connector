@@ -34,7 +34,7 @@ includes/
 
 ## REST API
 
-All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub-Key` header (or `closehub_key` query param as fallback). Authentication is handled by `CloseHub_REST_API::check_api_key()` using `hash_equals()`.
+All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub-Key` header (or `closehub_key` query param as fallback). Authentication is handled by `CloseHub_REST_API::check_api_key()` using `hash_equals()`. The endpoints and their URLs are identical on a single site and on a multisite network — there is no separate namespace, key header, or admin page for multisite; behavior branches internally on `is_multisite()`.
 
 | Method | Endpoint | Class method | Notes |
 |--------|----------|--------------|-------|
@@ -47,26 +47,37 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 
 WooCommerce and Gravity Forms endpoints return `503` with a clear message if those plugins are not active.
 
+### Multisite behavior
+
+Each public callback's business logic lives in a private `*_data()` method (e.g. `ping()` calls `get_ping_data()`). The callbacks don't call `rest_ensure_response()` directly — they go through `respond( $data_builder, $network_key = null )`:
+
+- On a single site (`is_multisite() === false`): calls `$data_builder()` once and returns it via `rest_ensure_response()`, exactly like before multisite support existed. Response shape is unchanged.
+- On a network (`is_multisite() === true`): calls `run_across_network( $data_builder, $network_key )`, which loops over `get_sites()`, does `switch_to_blog()` / `restore_current_blog()` around each call, and returns `{ "sites": [ { "site_id", "url", ...data or "error" }, ... ] }`. `$network_key` is only needed when `$data_builder()` returns a plain list rather than an associative array (e.g. `list_forms_data()` nests its result under `"forms"` per site instead of merging numeric keys into the entry).
+
+This means `POST /posts` creates the post on every site of the network, `GET /woocommerce/orders` returns per-site order stats, etc. — the client always talks to the same URL and key; only the shape of a successful response differs (single object vs. `{ sites: [...] }`).
+
 ## Key classes
 
 ### `CloseHub_API_Key` (`includes/class-api-key.php`)
 
-Manages the single `closehub_api_key` option in `wp_options`.
+Manages the `closehub_api_key` option. On a single-site install it lives in that site's `wp_options` — behavior is untouched from before multisite support. On a multisite network it lives in `wp_sitemeta` via `get_site_option()`/`update_site_option()`, so every site in the network reads and writes the exact same value; there is no separate per-site key on multisite.
 
 - `maybe_generate()` — called on activation; only generates if no key exists yet
 - `get()` — returns current key, generates one if missing
 - `verify( $candidate )` — constant-time comparison via `hash_equals()`
 - `regenerate()` — generates a new key and overwrites the old one
 
-Key format: `chk_` + 48 hex characters (`bin2hex( random_bytes( 24 ) )`).
+Key format: `chk_` + 48 hex characters (`bin2hex( random_bytes( 24 ) )`). The storage backend (`stored()`/`persist()`) is the only thing that branches on `is_multisite()`; all public methods are identical for both cases.
 
 ### `CloseHub_REST_API` (`includes/class-rest-api.php`)
 
-Registers all routes on `rest_api_init`. Every route uses `check_api_key` as its `permission_callback`. Input is sanitized via `sanitize_callback` in the route arg definitions, not inside the callbacks.
+Registers all routes on `rest_api_init`, same routes regardless of multisite. Every route uses `check_api_key` as its `permission_callback`. Input is sanitized via `sanitize_callback` in the route arg definitions, not inside the callbacks. See "Multisite behavior" above for how `respond()`/`run_across_network()` fan a callback out across the network.
 
 ### `CloseHub_Admin` (`includes/class-admin.php`)
 
-Adds a page at **Settings → CloseHub** (`manage_options` capability required). The regenerate action uses a nonce (`closehub_regenerate_key`) and redirects with a `closehub_notice=regenerated` query param on success.
+On a single site, adds a page at **Settings → CloseHub** (`manage_options` capability required); the regenerate action uses a nonce (`closehub_regenerate_key`) and redirects with a `closehub_notice=regenerated` query param on success.
+
+On multisite, the per-site Settings page is not registered at all — instead a **Network Admin → Settings → CloseHub** page is added (`manage_network_options` capability required), showing the single key shared by the whole network plus a table of every site in it. This avoids a non-super-admin site admin being able to view/regenerate the network-wide key. `register()` picks one branch or the other based on `is_multisite()`.
 
 ## Conventions
 
@@ -78,10 +89,10 @@ Adds a page at **Settings → CloseHub** (`manage_options` capability required).
 
 ## Adding a new endpoint
 
-1. Add a `register_rest_route()` call inside `CloseHub_REST_API::register_routes()`.
-2. Set `'permission_callback' => [ $this, 'check_api_key' ]`.
+1. Put the business logic in a private `*_data()` method that returns `array|WP_Error`.
+2. Add a `register_rest_route()` call inside `CloseHub_REST_API::register_routes()` with `'permission_callback' => [ $this, 'check_api_key' ]`.
 3. Define `sanitize_callback` and `validate_callback` in the `args` array.
-4. Add the callback method to the same class.
+4. Wire the public callback through `$this->respond( fn() => $this->*_data( $request ) )` so it automatically works both on a single site and across a network — pass a string as the second argument only if `*_data()` returns a plain list rather than an associative array (see `list_forms()`).
 5. Document it in the table above and in `readme.txt` (Available Endpoints section).
 
 ## CloseHub side (Laravel app)

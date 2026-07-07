@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       CloseHub Connector
  * Plugin URI:        https://github.com/closemarketing/closehub-connector
- * Description:       Connect your WordPress site to CloseHub with a single API key. Exposes secure endpoints for posts, WooCommerce, and Gravity Forms.
- * Version:           1.0.1
+ * Description:       Connect your WordPress site to CloseHub with a single API key. Exposes secure endpoints for posts, WooCommerce, and Gravity Forms, with Multisite network support.
+ * Version:           1.0.2
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Close Marketing
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CLOSEHUB_VERSION', '1.0.1' );
+define( 'CLOSEHUB_VERSION', '1.0.2' );
 define( 'CLOSEHUB_PLUGIN_FILE', __FILE__ );
 define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 

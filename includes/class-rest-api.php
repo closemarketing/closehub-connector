@@ -20,6 +20,21 @@ class CloseHub_REST_API {
 				'title'   => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				'content' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
 				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'featured_image_url' => [
+					'required'          => false,
+					'type'              => 'string',
+					'sanitize_callback' => 'esc_url_raw',
+					'validate_callback' => static fn( $v ) => empty( $v ) || (bool) wp_http_validate_url( $v ),
+				],
+				'seo_title'         => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'seo_description'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'seo_focus_keyword' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'categories'        => [
+					'required' => false,
+					'type'     => 'array',
+					'items'    => [ 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+					'default'  => [],
+				],
 				'status'  => [
 					'required'          => false,
 					'type'              => 'string',
@@ -195,10 +210,80 @@ class CloseHub_REST_API {
 			return $post_id;
 		}
 
+		$result = $this->save_post_metadata( $post_id, $request );
+		if ( is_wp_error( $result ) ) {
+			// Do not leave an incomplete post behind when a requested attachment
+			// or taxonomy assignment fails. CloseHub retries failed requests, and
+			// keeping this post would create a duplicate on the next attempt.
+			wp_delete_post( $post_id, true );
+
+			return $result;
+		}
+
 		return [
 			'id'   => $post_id,
 			'link' => get_permalink( $post_id ),
 		];
+	}
+
+	/** Save optional SEO, taxonomy, and featured-image data for a new post. */
+	private function save_post_metadata( int $post_id, WP_REST_Request $request ): true|WP_Error {
+		$this->save_seo_metadata( $post_id, $request );
+
+		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
+		if ( $categories ) {
+			$category_ids = [];
+
+			foreach ( array_unique( $categories ) as $category_name ) {
+				$term = term_exists( $category_name, 'category' );
+				if ( ! $term ) {
+					$term = wp_insert_term( $category_name, 'category' );
+				}
+
+				if ( is_wp_error( $term ) ) {
+					return $term;
+				}
+
+				$category_ids[] = (int) ( is_array( $term ) ? $term['term_id'] : $term );
+			}
+
+			wp_set_post_categories( $post_id, $category_ids, false );
+		}
+
+		$featured_image_url = $request->get_param( 'featured_image_url' );
+		if ( $featured_image_url ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			require_once ABSPATH . 'wp-admin/includes/media.php';
+			require_once ABSPATH . 'wp-admin/includes/image.php';
+
+			$attachment_id = media_sideload_image( $featured_image_url, $post_id, null, 'id' );
+			if ( is_wp_error( $attachment_id ) ) {
+				return $attachment_id;
+			}
+
+			set_post_thumbnail( $post_id, (int) $attachment_id );
+		}
+
+		return true;
+	}
+
+	/** Write SEO fields for whichever supported SEO plugin is active. */
+	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): void {
+		$seo_title         = $request->get_param( 'seo_title' );
+		$seo_description   = $request->get_param( 'seo_description' );
+		$seo_focus_keyword = $request->get_param( 'seo_focus_keyword' );
+
+		if ( defined( 'RANK_MATH_VERSION' ) ) {
+			update_post_meta( $post_id, 'rank_math_title', $seo_title );
+			update_post_meta( $post_id, 'rank_math_description', $seo_description );
+			update_post_meta( $post_id, 'rank_math_focus_keyword', $seo_focus_keyword );
+		}
+
+		if ( defined( 'WPSEO_VERSION' ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
+			update_post_meta( $post_id, '_yoast_wpseo_metadesc', $seo_description );
+			update_post_meta( $post_id, '_yoast_wpseo_focuskw', $seo_focus_keyword );
+		}
 	}
 
 	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {

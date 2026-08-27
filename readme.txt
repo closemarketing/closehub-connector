@@ -30,7 +30,7 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 **Available endpoints:**
 
 * `GET /closehub/v1/ping` — verify the connection
-* `POST /closehub/v1/posts` — publish or draft a post
+* `POST /closehub/v1/posts` — publish or draft a post, including optional SEO metadata (Rank Math or Yoast), featured image, and categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details

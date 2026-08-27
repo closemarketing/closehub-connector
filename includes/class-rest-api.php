@@ -198,11 +198,15 @@ class CloseHub_REST_API {
 	}
 
 	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
+		$requested_status = $request->get_param( 'status' );
+
+		// Keep the post non-public while its metadata is being saved. This makes
+		// every publication hook see the final categories, thumbnail, and SEO data.
 		$post_id = wp_insert_post( [
 			'post_title'   => $request->get_param( 'title' ),
 			'post_content' => $request->get_param( 'content' ),
 			'post_excerpt' => $request->get_param( 'excerpt' ) ?? '',
-			'post_status'  => $request->get_param( 'status' ),
+			'post_status'  => 'draft',
 			'post_type'    => 'post',
 		], true );
 
@@ -212,12 +216,18 @@ class CloseHub_REST_API {
 
 		$result = $this->save_post_metadata( $post_id, $request );
 		if ( is_wp_error( $result ) ) {
-			// Do not leave an incomplete post behind when a requested attachment
-			// or taxonomy assignment fails. CloseHub retries failed requests, and
-			// keeping this post would create a duplicate on the next attempt.
-			wp_delete_post( $post_id, true );
+			return $this->rollback_post( $post_id, $result );
+		}
 
-			return $result;
+		if ( 'draft' !== $requested_status ) {
+			$updated_post_id = wp_update_post( [
+				'ID'          => $post_id,
+				'post_status' => $requested_status,
+			], true );
+
+			if ( is_wp_error( $updated_post_id ) ) {
+				return $this->rollback_post( $post_id, $updated_post_id );
+			}
 		}
 
 		return [
@@ -226,9 +236,28 @@ class CloseHub_REST_API {
 		];
 	}
 
+	/** Remove a failed post, or return an error that requires manual cleanup. */
+	private function rollback_post( int $post_id, WP_Error $error ): WP_Error {
+		if ( wp_delete_post( $post_id, true ) ) {
+			return $error;
+		}
+
+		return new WP_Error(
+			'closehub_post_rollback_failed',
+			'Post metadata failed and the incomplete post could not be removed. Manual cleanup is required before retrying.',
+			[
+				'status'         => 500,
+				'metadata_error' => $error->get_error_message(),
+			]
+		);
+	}
+
 	/** Save optional SEO, taxonomy, and featured-image data for a new post. */
 	private function save_post_metadata( int $post_id, WP_REST_Request $request ): true|WP_Error {
-		$this->save_seo_metadata( $post_id, $request );
+		$result = $this->save_seo_metadata( $post_id, $request );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
 
 		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
 		if ( $categories ) {
@@ -247,7 +276,10 @@ class CloseHub_REST_API {
 				$category_ids[] = (int) ( is_array( $term ) ? $term['term_id'] : $term );
 			}
 
-			wp_set_post_categories( $post_id, $category_ids, false );
+			$result = wp_set_post_categories( $post_id, $category_ids, false );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
 		}
 
 		$featured_image_url = $request->get_param( 'featured_image_url' );
@@ -261,29 +293,60 @@ class CloseHub_REST_API {
 				return $attachment_id;
 			}
 
-			set_post_thumbnail( $post_id, (int) $attachment_id );
+			if ( ! set_post_thumbnail( $post_id, (int) $attachment_id ) ) {
+				return new WP_Error( 'closehub_featured_image_failed', 'The featured image could not be assigned to the post.' );
+			}
 		}
 
 		return true;
 	}
 
 	/** Write SEO fields for whichever supported SEO plugin is active. */
-	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): void {
+	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): true|WP_Error {
 		$seo_title         = $request->get_param( 'seo_title' );
 		$seo_description   = $request->get_param( 'seo_description' );
 		$seo_focus_keyword = $request->get_param( 'seo_focus_keyword' );
 
 		if ( defined( 'RANK_MATH_VERSION' ) ) {
-			update_post_meta( $post_id, 'rank_math_title', $seo_title );
-			update_post_meta( $post_id, 'rank_math_description', $seo_description );
-			update_post_meta( $post_id, 'rank_math_focus_keyword', $seo_focus_keyword );
+			$result = $this->update_post_meta( $post_id, 'rank_math_title', $seo_title );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, 'rank_math_description', $seo_description );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, 'rank_math_focus_keyword', $seo_focus_keyword );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
 		}
 
 		if ( defined( 'WPSEO_VERSION' ) ) {
-			update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
-			update_post_meta( $post_id, '_yoast_wpseo_metadesc', $seo_description );
-			update_post_meta( $post_id, '_yoast_wpseo_focuskw', $seo_focus_keyword );
+			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_metadesc', $seo_description );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_focuskw', $seo_focus_keyword );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
 		}
+
+		return true;
+	}
+
+	/** Update a post meta value, reporting a rejected write as a REST error. */
+	private function update_post_meta( int $post_id, string $key, string $value ): true|WP_Error {
+		if ( false !== update_post_meta( $post_id, $key, $value ) || get_post_meta( $post_id, $key, true ) === $value ) {
+			return true;
+		}
+
+		return new WP_Error( 'closehub_seo_metadata_failed', sprintf( 'Could not save %s metadata.', $key ) );
 	}
 
 	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {

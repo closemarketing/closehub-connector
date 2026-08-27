@@ -300,6 +300,13 @@ class CloseHub_REST_API {
 			}
 
 			if ( ! set_post_thumbnail( $post_id, (int) $attachment_id ) ) {
+				if ( ! wp_delete_attachment( (int) $attachment_id, true ) ) {
+					return new WP_Error(
+						'closehub_featured_image_cleanup_failed',
+						'The featured image could not be assigned and its uploaded attachment could not be removed. Manual cleanup is required before retrying.'
+					);
+				}
+
 				return new WP_Error( 'closehub_featured_image_failed', 'The featured image could not be assigned to the post.' );
 			}
 		}

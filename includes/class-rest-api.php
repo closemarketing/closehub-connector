@@ -253,7 +253,7 @@ class CloseHub_REST_API {
 	}
 
 	/** Save optional SEO, taxonomy, and featured-image data for a new post. */
-	private function save_post_metadata( int $post_id, WP_REST_Request $request ): true|WP_Error {
+	private function save_post_metadata( int $post_id, WP_REST_Request $request ): bool|WP_Error {
 		$result = $this->save_seo_metadata( $post_id, $request );
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -270,7 +270,13 @@ class CloseHub_REST_API {
 				}
 
 				if ( is_wp_error( $term ) ) {
-					return $term;
+					// Another request can create the same term after term_exists()
+					// but before wp_insert_term(). Reuse its id in that case.
+					if ( 'term_exists' !== $term->get_error_code() || ! $term->get_error_data( 'term_exists' ) ) {
+						return $term;
+					}
+
+					$term = (int) $term->get_error_data( 'term_exists' );
 				}
 
 				$category_ids[] = (int) ( is_array( $term ) ? $term['term_id'] : $term );
@@ -302,10 +308,10 @@ class CloseHub_REST_API {
 	}
 
 	/** Write SEO fields for whichever supported SEO plugin is active. */
-	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): true|WP_Error {
-		$seo_title         = $request->get_param( 'seo_title' );
-		$seo_description   = $request->get_param( 'seo_description' );
-		$seo_focus_keyword = $request->get_param( 'seo_focus_keyword' );
+	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): bool|WP_Error {
+		$seo_title         = (string) ( $request->get_param( 'seo_title' ) ?? '' );
+		$seo_description   = (string) ( $request->get_param( 'seo_description' ) ?? '' );
+		$seo_focus_keyword = (string) ( $request->get_param( 'seo_focus_keyword' ) ?? '' );
 
 		if ( defined( 'RANK_MATH_VERSION' ) ) {
 			$result = $this->update_post_meta( $post_id, 'rank_math_title', $seo_title );
@@ -341,7 +347,7 @@ class CloseHub_REST_API {
 	}
 
 	/** Update a post meta value, reporting a rejected write as a REST error. */
-	private function update_post_meta( int $post_id, string $key, string $value ): true|WP_Error {
+	private function update_post_meta( int $post_id, string $key, string $value ): bool|WP_Error {
 		if ( false !== update_post_meta( $post_id, $key, $value ) || get_post_meta( $post_id, $key, true ) === $value ) {
 			return true;
 		}

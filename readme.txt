@@ -2,9 +2,9 @@
 Contributors: closetechnology, davidperez
 Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -82,6 +82,11 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.0.4 =
+* Added support for optional SEO titles, meta descriptions, focus keywords, categories, and featured images when creating posts from CloseHub.
+* Added support for saving SEO metadata in Rank Math and Yoast SEO when either plugin is active.
+* Improved post creation reliability by completing metadata before publishing and removing incomplete posts when metadata processing fails.
 
 = 1.0.3 =
 * Fixed: sites that already had an API key configured on a subsite before multisite support was added (<=1.0.1) now keep working after upgrading — the existing key is migrated to the network-wide setting instead of a new one being generated, which previously caused CloseHub requests to fail with 401.

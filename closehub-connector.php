@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CLOSEHUB_VERSION', '1.1.0-beta.1' );
+define( 'CLOSEHUB_VERSION', '1.0.5' );
 define( 'CLOSEHUB_PLUGIN_FILE', __FILE__ );
 define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 

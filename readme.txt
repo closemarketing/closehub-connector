@@ -18,6 +18,8 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 
 It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
 
+For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
+
 **What it replaces:**
 
 * WordPress Application Password (username + password)

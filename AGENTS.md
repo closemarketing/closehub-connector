@@ -106,6 +106,8 @@ The counterpart lives in `/Users/davidperez/Apps/app-closehub`. The WordPress in
 
 Those classes currently use Basic Auth (username + app password) + WooCommerce consumer key/secret. They will need to be updated to send `X-CloseHub-Key` to the plugin endpoints instead.
 
+When changing a code path used by a registered MCP ability, update the ability schema and permission checks as needed so its behavior stays aligned with the REST endpoint.
+
 ## Release
 
 The `.distignore` file controls what is excluded from the release `.zip`. `AGENTS.md`, `CLAUDE.md`, `vendor/`, `phpstan.neon`, and `composer.*` are all excluded. The release artifact contains only:

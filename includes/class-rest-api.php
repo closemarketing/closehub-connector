@@ -389,7 +389,7 @@ class CloseHub_REST_API {
 		return new WP_Error( 'closehub_seo_metadata_failed', sprintf( 'Could not save %s metadata.', $key ) );
 	}
 
-	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
+	public function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
 		if ( ! function_exists( 'wc_get_orders' ) ) {
 			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
 		}

@@ -17,7 +17,7 @@ class CloseHub_OAuth {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		$charset = $wpdb->get_charset_collate();
-		dbDelta( 'CREATE TABLE ' . self::table( 'clients' ) . " (client_id varchar(80) NOT NULL, client_name varchar(191) NOT NULL, redirect_uris longtext NOT NULL, created_at datetime NOT NULL, PRIMARY KEY (client_id)) {$charset};" );
+		dbDelta( 'CREATE TABLE ' . self::table( 'clients' ) . " (client_id varchar(191) NOT NULL, client_name varchar(191) NOT NULL, redirect_uris longtext NOT NULL, created_at datetime NOT NULL, PRIMARY KEY (client_id)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(80) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(80) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
 	}
@@ -51,11 +51,22 @@ class CloseHub_OAuth {
 	}
 
 	public static function register_client( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$data = $request->get_json_params(); $name = sanitize_text_field( (string) ( $data['client_name'] ?? '' ) ); $uris = $data['redirect_uris'] ?? [];
+		$data = $request->get_json_params();
+		if ( ! is_array( $data ) ) { return self::error( 'invalid_client_metadata', 'Client metadata must be JSON.' ); }
+		$metadata_client_id = esc_url_raw( (string) ( $data['client_id'] ?? '' ) );
+		if ( '' !== $metadata_client_id ) {
+			if ( ! str_starts_with( $metadata_client_id, 'https://' ) ) { return self::error( 'invalid_client_metadata', 'client_id metadata must use HTTPS.' ); }
+			$response = wp_safe_remote_get( $metadata_client_id, [ 'timeout' => 10, 'redirection' => 0, 'headers' => [ 'Accept' => 'application/json' ] ] );
+			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return self::error( 'invalid_client_metadata', 'Could not retrieve the Client ID metadata document.' ); }
+			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $metadata_client_id, (string) $metadata['client_id'] ) ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
+			$data = array_merge( $metadata, $data );
+		}
+		$name = sanitize_text_field( (string) ( $data['client_name'] ?? '' ) ); $uris = $data['redirect_uris'] ?? [];
 		if ( '' === $name || ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return self::error( 'invalid_client_metadata', 'client_name and redirect_uris are required.' ); }
 		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
 		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return self::error( 'invalid_redirect_uri', 'Redirect URIs must use HTTPS or localhost HTTP.' ); } }
-		$id = 'chc_' . bin2hex( random_bytes( 24 ) ); global $wpdb;
+		$id = '' !== $metadata_client_id ? $metadata_client_id : 'chc_' . bin2hex( random_bytes( 24 ) ); global $wpdb;
 		if ( false === $wpdb->insert( self::table( 'clients' ), [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => wp_json_encode( $uris ), 'created_at' => current_time( 'mysql', true ) ], [ '%s', '%s', '%s', '%s' ] ) ) { return self::error( 'server_error', 'Could not register the client.', 500 ); }
 		return new WP_REST_Response( [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris, 'grant_types' => [ 'authorization_code', 'refresh_token' ], 'response_types' => [ 'code' ], 'token_endpoint_auth_method' => 'none' ], 201 );
 	}

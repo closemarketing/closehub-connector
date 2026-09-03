@@ -2,9 +2,9 @@
 /**
  * Plugin Name:       CloseHub Connector
  * Plugin URI:        https://github.com/closemarketing/closehub-connector
- * Description:       Connect your WordPress site to CloseHub with a single API key. Exposes secure endpoints for posts, WooCommerce, and Gravity Forms, with Multisite network support.
+ * Description:       Connect your WordPress site to CloseHub with a single API key and MCP content abilities.
  * Version:           1.0.5
- * Requires at least: 6.4
+ * Requires at least: 6.9
  * Requires PHP:      8.1
  * Author:            Close Marketing
  * Author URI:        https://close.marketing
@@ -35,10 +35,22 @@ function closehub_deactivate(): void {
 add_action( 'plugins_loaded', 'closehub_init' );
 
 function closehub_init(): void {
+	$autoload = CLOSEHUB_PLUGIN_DIR . 'vendor/autoload.php';
+	if ( file_exists( $autoload ) ) {
+		require_once $autoload;
+	}
+
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-rest-api.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
 
 	( new CloseHub_REST_API() )->register();
 	( new CloseHub_Admin() )->register();
+
+	if ( class_exists( '\\WP\\MCP\\Plugin' ) ) {
+		\WP\MCP\Plugin::instance();
+	}
+
+	CloseHub_Content_Abilities::register();
 }

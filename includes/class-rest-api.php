@@ -197,7 +197,7 @@ class CloseHub_REST_API {
 		];
 	}
 
-	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
+	public function create_post_data( WP_REST_Request $request ): array|WP_Error {
 		$requested_status = $request->get_param( 'status' );
 
 		// Keep the post non-public while its metadata is being saved. This makes

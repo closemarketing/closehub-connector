@@ -1,7 +1,7 @@
 === CloseHub Connector ===
 Contributors: closetechnology, davidperez
 Tags: api, integration, closehub, woocommerce, gravity-forms
-Requires at least: 6.4
+Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.1
 Stable tag: 1.0.5
@@ -15,6 +15,8 @@ Connect your WordPress site to CloseHub with a single API key in order to send s
 CloseHub Connector replaces the multiple credentials previously required to link a WordPress site with [CloseHub](https://close.marketing/closehub/) — a marketing project management platform.
 
 Once the plugin is activated, it generates a secure API key and exposes a dedicated REST API namespace (`/wp-json/closehub/v1/`) that CloseHub uses to interact with your site.
+
+It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
 
 **What it replaces:**
 

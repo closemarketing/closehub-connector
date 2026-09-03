@@ -294,7 +294,7 @@ class CloseHub_REST_API {
 			require_once ABSPATH . 'wp-admin/includes/media.php';
 			require_once ABSPATH . 'wp-admin/includes/image.php';
 
-			$attachment_id = media_sideload_image( $featured_image_url, $post_id, null, 'id' );
+			$attachment_id = $this->sideload_featured_image( $featured_image_url, $post_id );
 			if ( is_wp_error( $attachment_id ) ) {
 				return $attachment_id;
 			}
@@ -312,6 +312,33 @@ class CloseHub_REST_API {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Download and attach a featured image, including sources whose URL has no
+	 * filename extension (for example, Google Drive's `uc` download endpoint).
+	 */
+	private function sideload_featured_image( string $image_url, int $post_id ): int|WP_Error {
+		$temporary_file = download_url( $image_url );
+		if ( is_wp_error( $temporary_file ) ) {
+			return $temporary_file;
+		}
+
+		$attachment_id = media_handle_sideload(
+			[
+				// download_url() derives an extension from Content-Disposition or
+				// Content-Type before this reaches WordPress's upload validation.
+				'name'     => wp_basename( $temporary_file ),
+				'tmp_name' => $temporary_file,
+			],
+			$post_id
+		);
+
+		if ( is_wp_error( $attachment_id ) && file_exists( $temporary_file ) ) {
+			wp_delete_file( $temporary_file );
+		}
+
+		return $attachment_id;
 	}
 
 	/** Write SEO fields for whichever supported SEO plugin is active. */

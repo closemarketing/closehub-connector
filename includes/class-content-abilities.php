@@ -69,8 +69,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	public static function create_post( $input ): array|WP_Error {
-		$request = new WP_REST_Request( 'POST', '/closehub/v1/posts' );
-		$request->set_params( is_array( $input ) ? $input : [] );
+		$request = self::request( 'POST', '/closehub/v1/posts', $input );
 		if ( ! $request->get_param( 'status' ) ) { $request->set_param( 'status', 'draft' ); }
 		return ( new CloseHub_REST_API() )->create_post_data( $request );
 	}
@@ -94,9 +93,16 @@ class CloseHub_Content_Abilities {
 	}
 
 	public static function get_order_summary( $input ): array|WP_Error {
-		$request = new WP_REST_Request( 'GET', '/closehub/v1/woocommerce/orders' );
-		$request->set_params( is_array( $input ) ? $input : [] );
+		$request = self::request( 'GET', '/closehub/v1/woocommerce/orders', $input );
 		return ( new CloseHub_REST_API() )->get_woocommerce_orders_data( $request );
+	}
+
+	private static function request( string $method, string $route, $input ): WP_REST_Request {
+		$request = new WP_REST_Request( $method, $route );
+		foreach ( is_array( $input ) ? $input : [] as $key => $value ) {
+			$request->set_param( (string) $key, $value );
+		}
+		return $request;
 	}
 
 	private static function post_data( WP_Post $post, bool $full = false ): array {

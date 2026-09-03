@@ -83,6 +83,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= 1.0.5 =
+* Fixed: featured images from URLs without a filename extension, including Google Drive download URLs, can now be attached when CloseHub creates a WordPress draft.
+
 = 1.0.4 =
 * Added support for optional SEO titles, meta descriptions, focus keywords, categories, and featured images when creating posts from CloseHub.
 * Added support for saving SEO metadata in Rank Math and Yoast SEO when either plugin is active.

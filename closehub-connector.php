@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CLOSEHUB_VERSION', '1.0.5' );
+define( 'CLOSEHUB_VERSION', '1.1.0-beta.1' );
 define( 'CLOSEHUB_PLUGIN_FILE', __FILE__ );
 define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -24,7 +24,9 @@ register_deactivation_hook( __FILE__, 'closehub_deactivate' );
 
 function closehub_activate(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-oauth.php';
 	CloseHub_API_Key::maybe_generate();
+	CloseHub_OAuth::install();
 	flush_rewrite_rules();
 }
 

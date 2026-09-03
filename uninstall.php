@@ -7,3 +7,6 @@ if ( is_multisite() ) {
 } else {
 	delete_option( 'closehub_api_key' );
 }
+
+require_once __DIR__ . '/includes/class-oauth.php';
+CloseHub_OAuth::uninstall();

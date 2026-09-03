@@ -285,6 +285,9 @@ class CloseHub_Admin {
 						}
 						?>
 					</p>
+					<p class="description">
+						<?php esc_html_e( 'When adding this server in Claude, select “Always required” for Authentication and “Use Anthropic’s hosted client metadata” for OAuth client.', 'closehub-connector' ); ?>
+					</p>
 				</td>
 			</tr>
 		</table>

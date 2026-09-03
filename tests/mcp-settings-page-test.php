@@ -42,5 +42,7 @@ closehub_test_assert( false !== strpos( $output, 'id="closehub-mcp-server-url"' 
 closehub_test_assert( false !== strpos( $output, $mcp_url ), 'The MCP URL is missing from the settings section.' );
 closehub_test_assert( false !== strpos( $output, 'navigator.clipboard.writeText' ), 'The MCP copy button is missing.' );
 closehub_test_assert( false !== strpos( $output, 'MCP Adapter is not available' ), 'The unavailable Adapter status is missing.' );
+closehub_test_assert( false !== strpos( $output, 'Always required' ), 'The Claude authentication instruction is missing.' );
+closehub_test_assert( false !== strpos( $output, 'Anthropic’s hosted client metadata' ), 'The Claude OAuth client instruction is missing.' );
 
 echo "MCP settings page checks passed.\n";

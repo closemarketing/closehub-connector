@@ -6,8 +6,10 @@ defined( 'ABSPATH' ) || exit;
 class CloseHub_OAuth {
 	private const NS = 'closehub-oauth/v1';
 	private const SCOPE = 'mcp:tools';
+	private const DB_VERSION = '2';
 
 	public static function init(): void {
+		self::maybe_upgrade();
 		add_action( 'init', [ self::class, 'well_known' ], 1 );
 		add_action( 'rest_api_init', [ self::class, 'routes' ] );
 		add_filter( 'rest_authentication_errors', [ self::class, 'authenticate' ], 5 );
@@ -19,7 +21,14 @@ class CloseHub_OAuth {
 		$charset = $wpdb->get_charset_collate();
 		dbDelta( 'CREATE TABLE ' . self::table( 'clients' ) . " (client_id varchar(191) NOT NULL, client_name varchar(191) NOT NULL, redirect_uris longtext NOT NULL, created_at datetime NOT NULL, PRIMARY KEY (client_id)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(80) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
-		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(80) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
+		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
+		update_option( 'closehub_oauth_db_version', self::DB_VERSION, false );
+	}
+
+	private static function maybe_upgrade(): void {
+		if ( self::DB_VERSION !== get_option( 'closehub_oauth_db_version' ) ) {
+			self::install();
+		}
 	}
 
 	public static function uninstall(): void {

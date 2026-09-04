@@ -45,6 +45,38 @@ class CloseHub_REST_API {
 			],
 		] );
 
+		register_rest_route( self::NAMESPACE, '/posts/(?P<id>\d+)', [
+			'methods'             => 'PUT',
+			'callback'            => [ $this, 'update_post' ],
+			'permission_callback' => [ $this, 'check_api_key' ],
+			'args'                => [
+				'id'      => [ 'required' => true, 'type' => 'integer', 'validate_callback' => 'is_numeric' ],
+				'title'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'content' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'featured_image_url' => [
+					'required'          => false,
+					'type'              => 'string',
+					'sanitize_callback' => 'esc_url_raw',
+					'validate_callback' => static fn( $v ) => empty( $v ) || (bool) wp_http_validate_url( $v ),
+				],
+				'seo_title'         => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'seo_description'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'seo_focus_keyword' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'categories'        => [
+					'required' => false,
+					'type'     => 'array',
+					'items'    => [ 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				],
+				'status'  => [
+					'required'          => false,
+					'type'              => 'string',
+					'sanitize_callback' => 'sanitize_text_field',
+					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
+				],
+			],
+		] );
+
 		// ── WooCommerce ────────────────────────────────────────────────────────
 		register_rest_route( self::NAMESPACE, '/woocommerce/orders', [
 			'methods'             => WP_REST_Server::READABLE,
@@ -148,15 +180,24 @@ class CloseHub_REST_API {
 	 * every site in the network (aggregated under 'sites') when multisite.
 	 */
 	private function respond( callable $data_builder, ?string $network_key = null ): WP_REST_Response|WP_Error {
-		if ( is_multisite() ) {
-			return rest_ensure_response( [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ] );
-		}
-
-		$result = $data_builder();
+		$result = $this->run( $data_builder, $network_key );
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Same network fan-out as respond(), but returns the plain array/WP_Error
+	 * shape a caller outside the REST response cycle needs — e.g. an MCP
+	 * ability's execute_callback, which never sees a WP_REST_Response.
+	 */
+	public function run( callable $data_builder, ?string $network_key = null ): array|WP_Error {
+		if ( is_multisite() ) {
+			return [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ];
+		}
+
+		return $data_builder();
 	}
 
 	// ── Route callbacks ────────────────────────────────────────────────────────
@@ -169,8 +210,36 @@ class CloseHub_REST_API {
 		return $this->respond( fn() => $this->create_post_data( $request ) );
 	}
 
+	public function update_post( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->update_post_data( $request ) );
+	}
+
 	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
+	}
+
+	// ── MCP-facing wrappers ────────────────────────────────────────────────────
+	//
+	// CloseHub_Content_Abilities builds a WP_REST_Request and calls these
+	// instead of a route callback (an MCP ability's execute_callback never
+	// sees a WP_REST_Response to unwrap), but must still fan out across a
+	// multisite network the same way the /posts and /woocommerce/orders
+	// routes do — hence run() rather than calling the *_data() builders
+	// directly, which stay private per this repo's REST API convention.
+
+	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	public function create_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
+		return $this->run( fn() => $this->create_post_data( $request ) );
+	}
+
+	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	public function update_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
+		return $this->run( fn() => $this->update_post_data( $request ) );
+	}
+
+	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	public function get_woocommerce_orders_for_mcp( WP_REST_Request $request ): array|WP_Error {
+		return $this->run( fn() => $this->get_woocommerce_orders_data( $request ) );
 	}
 
 	public function list_forms(): WP_REST_Response|WP_Error {
@@ -197,7 +266,7 @@ class CloseHub_REST_API {
 		];
 	}
 
-	public function create_post_data( WP_REST_Request $request ): array|WP_Error {
+	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
 		$requested_status = $request->get_param( 'status' );
 
 		// Keep the post non-public while its metadata is being saved. This makes
@@ -230,10 +299,82 @@ class CloseHub_REST_API {
 			}
 		}
 
-		return [
-			'id'   => $post_id,
-			'link' => get_permalink( $post_id ),
-		];
+		return $this->post_response( $post_id );
+	}
+
+	/**
+	 * Update an existing post's core fields plus the same optional SEO,
+	 * taxonomy, and featured-image data create_post_data() accepts — reusing
+	 * save_post_metadata() so both paths stay in sync with whichever SEO
+	 * plugin is active.
+	 */
+	private function update_post_data( WP_REST_Request $request ): array|WP_Error {
+		$post_id = (int) $request->get_param( 'id' );
+		$post    = get_post( $post_id );
+
+		if ( ! $post || 'post' !== $post->post_type ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+
+		$fields = [ 'ID' => $post_id ];
+		foreach ( [
+			'title'   => 'post_title',
+			'content' => 'post_content',
+			'excerpt' => 'post_excerpt',
+			'status'  => 'post_status',
+		] as $param => $post_field ) {
+			if ( null !== $request->get_param( $param ) ) {
+				$fields[ $post_field ] = $request->get_param( $param );
+			}
+		}
+
+		if ( count( $fields ) > 1 ) {
+			$result = wp_update_post( $fields, true );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+		}
+
+		$result = $this->save_post_metadata( $post_id, $request );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return $this->post_response( $post_id );
+	}
+
+	/** Post id/link plus whichever SEO and featured-image data is stored for it. */
+	private function post_response( int $post_id ): array {
+		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ) ] + self::cms_metadata( $post_id );
+	}
+
+	/**
+	 * The featured-image and whichever-SEO-plugin-is-active fields
+	 * save_post_metadata() writes, read back for a response. Shared with
+	 * CloseHub_Content_Abilities so get-post/list-posts return the same
+	 * CloseHub-managed metadata create-post and update-post accept.
+	 *
+	 * @return array<string, string|null>
+	 */
+	public static function cms_metadata( int $post_id ): array {
+		$data = [];
+
+		$thumbnail_id = get_post_thumbnail_id( $post_id );
+		if ( $thumbnail_id ) {
+			$data['featured_image_url'] = wp_get_attachment_url( $thumbnail_id ) ?: null;
+		}
+
+		if ( defined( 'RANK_MATH_VERSION' ) ) {
+			$data['seo_title']         = get_post_meta( $post_id, 'rank_math_title', true ) ?: null;
+			$data['seo_description']   = get_post_meta( $post_id, 'rank_math_description', true ) ?: null;
+			$data['seo_focus_keyword'] = get_post_meta( $post_id, 'rank_math_focus_keyword', true ) ?: null;
+		} elseif ( defined( 'WPSEO_VERSION' ) ) {
+			$data['seo_title']         = get_post_meta( $post_id, '_yoast_wpseo_title', true ) ?: null;
+			$data['seo_description']   = get_post_meta( $post_id, '_yoast_wpseo_metadesc', true ) ?: null;
+			$data['seo_focus_keyword'] = get_post_meta( $post_id, '_yoast_wpseo_focuskw', true ) ?: null;
+		}
+
+		return $data;
 	}
 
 	/** Remove a failed post, or return an error that requires manual cleanup. */
@@ -389,7 +530,7 @@ class CloseHub_REST_API {
 		return new WP_Error( 'closehub_seo_metadata_failed', sprintf( 'Could not save %s metadata.', $key ) );
 	}
 
-	public function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
+	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
 		if ( ! function_exists( 'wc_get_orders' ) ) {
 			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
 		}

@@ -1,7 +1,7 @@
 === CloseHub Connector ===
 Contributors: closetechnology, davidperez
 Tags: api, integration, closehub, woocommerce, gravity-forms
-Requires at least: 6.9
+Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
 Stable tag: 1.0.5
@@ -35,6 +35,7 @@ For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrie
 
 * `GET /closehub/v1/ping` — verify the connection
 * `POST /closehub/v1/posts` — publish or draft a post, including optional SEO metadata (Rank Math or Yoast), featured image, and categories
+* `PUT /closehub/v1/posts/{id}` — update a post's title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
@@ -86,6 +87,12 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.1.0-beta.5 =
+* Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.
+* Added a `PUT /closehub/v1/posts/{id}` endpoint to update a post's title, content, excerpt, status, SEO metadata, featured image, or categories.
+* Fixed: MCP post creation/update no longer lets a user without the `manage_categories` capability create new categories by naming one that doesn't exist yet.
+* Fixed: MCP get-post/list-posts now include the same featured image and SEO metadata create-post and update-post accept.
 
 = 1.0.5 =
 * Fixed: featured images from URLs without a filename extension, including Google Drive download URLs, can now be attached when CloseHub creates a WordPress draft.

@@ -14,8 +14,8 @@ The user installs the plugin, goes to **Settings → CloseHub**, and copies two 
 - **Language**: PHP 8.1+
 - **Minimum WordPress**: 6.4
 - **No build step** — plain PHP, no JavaScript compilation, no npm
-- **No autoloader** — files are loaded manually via `require_once` in `closehub-connector.php`
-- **Dev dependencies only**: `vendor/` contains PHPStan stubs for IDE type checking; nothing ships to production from `vendor/`
+- **No manual autoloader for plugin classes** — `includes/*.php` files are loaded via `require_once` in `closehub-connector.php`, not PSR-4
+- **Composer dependencies**: `composer.json`'s `require` (currently `wordpress/mcp-adapter`) ships to production — `closehub_init()` loads `vendor/autoload.php` when present to autoload it. `require-dev` (`php-stubs/*`) is IDE/PHPStan-only. The release workflow (`.github/workflows/deploy.yml`) runs `composer install --no-dev` before packaging, so only production packages (`wordpress/mcp-adapter`, `automattic/jetpack-autoloader`, Composer's own autoloader machinery) end up in the shipped `vendor/`; `.distignore` does not exclude `vendor/`.
 
 ## File structure
 
@@ -39,7 +39,8 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 | Method | Endpoint | Class method | Notes |
 |--------|----------|--------------|-------|
 | GET | `/ping` | `ping()` | Returns site name, URL, WP version, plugin version |
-| POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status` |
+| POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status`, `categories`, `featured_image_url`, `seo_title`, `seo_description`, `seo_focus_keyword` |
+| PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create, all optional here |
 | GET | `/woocommerce/orders` | `get_woocommerce_orders()` | Returns order count, total sales, average order; args: `after`, `before`, `status` |
 | GET | `/gravity-forms/forms` | `list_forms()` | Lists all forms with entry count |
 | GET | `/gravity-forms/forms/{id}` | `get_form()` | Form details + last entry date |
@@ -110,11 +111,12 @@ When changing a code path used by a registered MCP ability, update the ability s
 
 ## Release
 
-The `.distignore` file controls what is excluded from the release `.zip`. `AGENTS.md`, `CLAUDE.md`, `vendor/`, `phpstan.neon`, and `composer.*` are all excluded. The release artifact contains only:
+The `.distignore` file controls what is excluded from the release `.zip`. `AGENTS.md`, `CLAUDE.md`, `phpstan.neon`, `composer.json`, and `composer.lock` are all excluded, but `vendor/` is not — `.github/workflows/deploy.yml` runs `composer install --no-dev` before packaging so it ships with only `wordpress/mcp-adapter` and its own runtime dependencies (`php-stubs/*` dev packages are stripped by `--no-dev`). The release artifact contains:
 
 ```
 closehub-connector.php
 uninstall.php
 readme.txt
 includes/
+vendor/        (production dependencies only, see above)
 ```

@@ -85,7 +85,7 @@ On multisite, the per-site Settings page is not registered at all — instead a 
 - `defined( 'ABSPATH' ) || exit;` at the top of every file.
 - No output buffering or `echo` outside the admin render method.
 - All user-facing strings use `esc_html_e()` / `esc_html()` for output escaping.
-- No direct `$wpdb` queries — uses WP/WooCommerce/GF APIs only.
+- No direct `$wpdb` queries for anything with a WP/WooCommerce/GF API — uses those instead. The exception is `CloseHub_OAuth`'s three custom tables (`clients`/`codes`/`tokens`), which have no core API to route through; every query there is parameterized via `$wpdb->prepare()`.
 - Classes are loaded manually; no PSR-4 autoloading at runtime.
 
 ## Adding a new endpoint

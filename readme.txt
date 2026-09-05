@@ -16,6 +16,10 @@ CloseHub Connector replaces the multiple credentials previously required to link
 
 Once the plugin is activated, it generates a secure API key and exposes a dedicated REST API namespace (`/wp-json/closehub/v1/`) that CloseHub uses to interact with your site.
 
+It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
+
+For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
+
 **What it replaces:**
 
 * WordPress Application Password (username + password)
@@ -31,6 +35,7 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 
 * `GET /closehub/v1/ping` — verify the connection
 * `POST /closehub/v1/posts` — publish or draft a post, including optional SEO metadata (Rank Math or Yoast), featured image, and categories
+* `PUT /closehub/v1/posts/{id}` — update a post's title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
@@ -82,6 +87,16 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.1.0-beta.5 =
+* Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.
+* Added a `PUT /closehub/v1/posts/{id}` endpoint to update a post's title, content, excerpt, status, SEO metadata, featured image, or categories.
+* Fixed: MCP post creation/update no longer lets a user without the `manage_categories` capability create new categories by naming one that doesn't exist yet.
+* Fixed: MCP get-post/list-posts now include the same featured image and SEO metadata create-post and update-post accept.
+* Fixed: a dynamic OAuth client registration using a real client_id metadata URL could no longer have its verified name and redirect URI overridden by the request body — closing an impersonation path where a code could be redirected to an attacker-controlled URI while the consent screen showed a trusted name.
+* Fixed: the OAuth consent page now sends `X-Frame-Options`/CSP headers to prevent it from being framed (clickjacking the Authorize button).
+* Fixed: an MCP access token could previously authenticate as its user for any WordPress REST route whose query string happened to contain the MCP endpoint path, not just the MCP endpoint itself.
+* Fixed: OAuth token responses now send `Cache-Control: no-store`; the dynamic client registration endpoint is now rate-limited per IP.
 
 = 1.0.5 =
 * Fixed: featured images from URLs without a filename extension, including Google Drive download URLs, can now be attached when CloseHub creates a WordPress draft.

@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       CloseHub Connector
  * Plugin URI:        https://github.com/closemarketing/closehub-connector
- * Description:       Connect your WordPress site to CloseHub with a single API key. Exposes secure endpoints for posts, WooCommerce, and Gravity Forms, with Multisite network support.
- * Version:           1.0.5
+ * Description:       Connect your WordPress site to CloseHub with a single API key and MCP content abilities.
+ * Version:           1.1.0-beta.6
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Close Marketing
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CLOSEHUB_VERSION', '1.0.5' );
+define( 'CLOSEHUB_VERSION', '1.1.0-beta.6' );
 define( 'CLOSEHUB_PLUGIN_FILE', __FILE__ );
 define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -24,7 +24,9 @@ register_deactivation_hook( __FILE__, 'closehub_deactivate' );
 
 function closehub_activate(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-oauth.php';
 	CloseHub_API_Key::maybe_generate();
+	CloseHub_OAuth::install();
 	flush_rewrite_rules();
 }
 
@@ -35,10 +37,24 @@ function closehub_deactivate(): void {
 add_action( 'plugins_loaded', 'closehub_init' );
 
 function closehub_init(): void {
+	$autoload = CLOSEHUB_PLUGIN_DIR . 'vendor/autoload.php';
+	if ( file_exists( $autoload ) ) {
+		require_once $autoload;
+	}
+
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-oauth.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-rest-api.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
 
 	( new CloseHub_REST_API() )->register();
 	( new CloseHub_Admin() )->register();
+	CloseHub_OAuth::init();
+
+	if ( class_exists( '\\WP\\MCP\\Plugin' ) ) {
+		\WP\MCP\Plugin::instance();
+	}
+
+	CloseHub_Content_Abilities::register();
 }

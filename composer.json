@@ -8,7 +8,7 @@
     },
     "require-dev": {
         "php-stubs/wordpress-stubs": "^6.7",
-        "php-stubs/gravity-forms-stubs": "^2.8",
+        "php-stubs/gravity-forms-stubs": "^3.1",
         "php-stubs/woocommerce-stubs": "^11.0"
     },
     "config": {

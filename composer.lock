@@ -4,29 +4,29 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "53f9d9ddbc5f36345780e7c1886b787b",
+    "content-hash": "72e99adcaf42f8581c4308fe847b70f3",
     "packages": [],
     "packages-dev": [
         {
             "name": "php-stubs/gravity-forms-stubs",
-            "version": "v2.9.3",
+            "version": "v3.1.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/php-stubs/gravity-forms-stubs.git",
-                "reference": "eabedbf99ff023329cffba624356389cf99cd176"
+                "reference": "eed5b820211f46a68042e05f64a54e06717ebcc7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/php-stubs/gravity-forms-stubs/zipball/eabedbf99ff023329cffba624356389cf99cd176",
-                "reference": "eabedbf99ff023329cffba624356389cf99cd176",
+                "url": "https://api.github.com/repos/php-stubs/gravity-forms-stubs/zipball/eed5b820211f46a68042e05f64a54e06717ebcc7",
+                "reference": "eed5b820211f46a68042e05f64a54e06717ebcc7",
                 "shasum": ""
             },
             "require": {
-                "php-stubs/wordpress-stubs": "^5.3 || ^6.0"
+                "php-stubs/wordpress-stubs": "^5.3 || ^6.0 || ^7.0"
             },
             "require-dev": {
-                "php": "~7.1 || ~8.0",
-                "php-stubs/generator": "^0.8.0"
+                "php": "~7.4 || ~8.0",
+                "php-stubs/generator": "^0.9.0"
             },
             "suggest": {
                 "szepeviktor/phpstan-wordpress": "WordPress extensions for PHPStan"
@@ -46,9 +46,9 @@
             ],
             "support": {
                 "issues": "https://github.com/php-stubs/gravity-forms-stubs/issues",
-                "source": "https://github.com/php-stubs/gravity-forms-stubs/tree/v2.9.3"
+                "source": "https://github.com/php-stubs/gravity-forms-stubs/tree/v3.1.0.3"
             },
-            "time": "2025-02-21T16:58:14+00:00"
+            "time": "2026-08-31T07:50:14+00:00"
         },
         {
             "name": "php-stubs/woocommerce-stubs",

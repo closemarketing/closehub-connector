@@ -1,0 +1,45 @@
+name: Plugin Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  plugin-check:
+    name: WordPress Plugin Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer
+
+      - name: Install production dependencies
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Run Plugin Check
+        uses: WordPress/plugin-check-action@v1
+        with:
+          exclude-directories: vendor,node_modules,tests,bin,.github
+          exclude-files: .npmrc,.gitignore,.distignore,.editorconfig,.pcpignore,.phpcs.xml.dist,phpcs.xml.dist,phpstan.neon,phpstan.neon.dist,phpunit.xml.dist,AGENTS.md,CLAUDE.md
+          error-severity: 7
+          warning-severity: 8

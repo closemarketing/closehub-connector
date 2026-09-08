@@ -11,6 +11,7 @@ on:
       - opened
       - reopened
       - synchronize
+      - edited
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

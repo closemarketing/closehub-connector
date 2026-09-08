@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.5
+Stable tag: 1.1.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -88,7 +88,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= 1.1.0-beta.5 =
+= 1.1.0 =
 * Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.
 * Added a `PUT /closehub/v1/posts/{id}` endpoint to update a post's title, content, excerpt, status, SEO metadata, featured image, or categories.
 * Fixed: MCP post creation/update no longer lets a user without the `manage_categories` capability create new categories by naming one that doesn't exist yet.

@@ -93,6 +93,8 @@ class CloseHub_Admin {
 				</tr>
 			</table>
 
+			<?php $this->render_mcp_section(); ?>
+
 			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
 			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one. You will need to update CloseHub with the new key.', 'closehub-connector' ); ?></p>
 			<form method="post">
@@ -194,6 +196,8 @@ class CloseHub_Admin {
 				</tr>
 			</table>
 
+			<?php $this->render_mcp_section(); ?>
+
 			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
 			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one for every site in the network.', 'closehub-connector' ); ?></p>
 			<form method="post">
@@ -239,6 +243,54 @@ class CloseHub_Admin {
 				</tbody>
 			</table>
 		</div>
+		<?php
+	}
+
+	/**
+	 * Return the default MCP Adapter server URL for the current site.
+	 */
+	public static function get_mcp_server_url(): string {
+		return rest_url( 'mcp/mcp-adapter-default-server' );
+	}
+
+	/**
+	 * Render the MCP connection details shared by the site and network settings pages.
+	 */
+	private function render_mcp_section(): void {
+		$mcp_url           = self::get_mcp_server_url();
+		$adapter_available = class_exists( '\\WP\\MCP\\Plugin' );
+		?>
+		<h2><?php esc_html_e( 'MCP', 'closehub-connector' ); ?></h2>
+		<p><?php esc_html_e( 'Use this URL to connect an MCP client to this WordPress site.', 'closehub-connector' ); ?></p>
+		<table class="form-table" role="presentation">
+			<tr>
+				<th scope="row"><?php esc_html_e( 'MCP Server URL', 'closehub-connector' ); ?></th>
+				<td>
+					<input
+						type="text"
+						id="closehub-mcp-server-url"
+						value="<?php echo esc_attr( $mcp_url ); ?>"
+						class="large-text code"
+						readonly
+					/>
+					<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-server-url').value)">
+						<?php esc_html_e( 'Copy', 'closehub-connector' ); ?>
+					</button>
+					<p class="description">
+						<?php
+						if ( $adapter_available ) {
+							esc_html_e( 'The MCP Adapter is available. Authenticate with a WordPress user account that has the required capabilities.', 'closehub-connector' );
+						} else {
+							esc_html_e( 'The MCP Adapter is not available. Reinstall the plugin package to include its Composer dependencies.', 'closehub-connector' );
+						}
+						?>
+					</p>
+					<p class="description">
+						<?php esc_html_e( 'When adding this server in Claude, select “Always required” for Authentication and “Use Anthropic’s hosted client metadata” for OAuth client.', 'closehub-connector' ); ?>
+					</p>
+				</td>
+			</tr>
+		</table>
 		<?php
 	}
 }

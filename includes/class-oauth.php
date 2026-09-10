@@ -10,7 +10,12 @@ class CloseHub_OAuth {
 
 	public static function init(): void {
 		self::maybe_upgrade();
-		add_action( 'init', [ self::class, 'well_known' ], 1 );
+		// Priority PHP_INT_MIN: another plugin (or WP core's own MCP support)
+		// may register a competing handler for the same well-known paths on
+		// `init`. Whichever handler runs first wins, since both `exit` after
+		// sending JSON — so this must run before any plugin using the default
+		// priority (10) or another low-but-not-minimal one.
+		add_action( 'init', [ self::class, 'well_known' ], PHP_INT_MIN );
 		add_action( 'rest_api_init', [ self::class, 'routes' ] );
 		add_filter( 'rest_authentication_errors', [ self::class, 'authenticate' ], 5 );
 		add_filter( 'rest_pre_serve_request', [ self::class, 'serve_html_response' ], 10, 4 );

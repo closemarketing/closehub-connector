@@ -58,6 +58,9 @@ closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://127.0.0.1/call
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'http://attacker.example/callback' ), 'A plain-http non-localhost redirect URI must be rejected.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'javascript:alert(1)' ), 'A javascript: redirect URI must be rejected.' );
 
+$oauth_server_metadata = CloseHub_OAuth::server_metadata()->get_data();
+closehub_test_assert( true === $oauth_server_metadata['client_id_metadata_document_supported'], 'OAuth server metadata must advertise Client ID Metadata Document support for hosted MCP clients.' );
+
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of
 // authenticate() — the fix under test is that it no longer matches a

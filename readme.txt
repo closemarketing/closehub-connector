@@ -88,6 +88,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= 1.1.1-beta.1 =
+* Fixed: OAuth discovery metadata now takes precedence over competing plugin handlers for the shared `.well-known` endpoints.
+* Added a protected **Regenerate OAuth Metadata** action in Settings → CloseHub → MCP to recreate the static OAuth discovery documents required by nginx hosts.
+
 = 1.1.0 =
 * Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.
 * Added a `PUT /closehub/v1/posts/{id}` endpoint to update a post's title, content, excerpt, status, SEO metadata, featured image, or categories.

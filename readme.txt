@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,9 +16,13 @@ CloseHub Connector replaces the multiple credentials previously required to link
 
 Once the plugin is activated, it generates a secure API key and exposes a dedicated REST API namespace (`/wp-json/closehub/v1/`) that CloseHub uses to interact with your site.
 
-It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
+It also provides an MCP server through the WordPress MCP Adapter. AI clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. For WooCommerce, users with the `manage_woocommerce` capability can also retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
 
-For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
+**Connect an MCP client:**
+
+1. Go to **Settings → CloseHub → MCP** and copy the MCP Server URL.
+2. Add it to your MCP client and authenticate with OAuth using a WordPress user account that has the required capabilities. The CloseHub API key is not used for MCP authentication.
+3. On nginx hosts that serve `.well-known` files directly, the plugin generates OAuth discovery metadata on activation. The MCP settings page warns when that metadata needs attention and includes a **Regenerate OAuth Metadata** button to repair it.
 
 **What it replaces:**
 

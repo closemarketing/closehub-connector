@@ -3,6 +3,7 @@
 declare( strict_types=1 );
 
 define( 'ABSPATH', __DIR__ . '/' );
+define( 'CLOSEHUB_PLUGIN_FILE', dirname( __DIR__ ) . '/closehub-connector.php' );
 
 class WP_REST_Server { const READABLE = 'GET'; const CREATABLE = 'POST'; }
 class WP_REST_Response {
@@ -28,6 +29,7 @@ function add_action( ...$args ): void {}
 function add_filter( ...$args ): void {}
 function home_url( string $path = '' ): string { return 'https://example.test' . $path; }
 function rest_url( string $path = '' ): string { return 'https://example.test/wp-json/' . ltrim( $path, '/' ); }
+function plugins_url( string $path, string $plugin ): string { return 'https://example.test/wp-content/plugins/closehub-connector/' . ltrim( $path, '/' ); }
 function wp_parse_url( string $url, ?int $component = null ) { return parse_url( $url, $component ?? -1 ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
 function rest_get_url_prefix(): string { return 'wp-json'; }
 function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
@@ -99,7 +101,7 @@ closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A Client ID Met
 $consent_page = new ReflectionMethod( CloseHub_OAuth::class, 'consent_page' );
 $consent_page->setAccessible( true );
 $consent_response = $consent_page->invoke( null, $cimd_client, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
-closehub_test_assert( false !== strpos( $consent_response->get_data(), 'https://app.close.marketing/images/logo-closehub.svg' ), 'The consent page must display the CloseHub logo.' );
+closehub_test_assert( false !== strpos( $consent_response->get_data(), 'https://example.test/wp-content/plugins/closehub-connector/assets/logo-closehub.svg' ), 'The consent page must display the bundled CloseHub logo.' );
 closehub_test_assert( false !== strpos( $consent_response->get_data(), 'alt="CloseHub"' ), 'The CloseHub logo must have accessible alternative text.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────

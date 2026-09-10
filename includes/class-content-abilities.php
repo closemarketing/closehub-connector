@@ -3,6 +3,15 @@
 defined( 'ABSPATH' ) || exit;
 
 class CloseHub_Content_Abilities {
+	private const MCP_TOOL_ABILITIES = [
+		'closehub/list-posts',
+		'closehub/get-post',
+		'closehub/create-post',
+		'closehub/update-post',
+		'closehub/trash-post',
+		'closehub/get-order-summary',
+	];
+
 	public static function register(): void {
 		if ( ! function_exists( 'wp_register_ability' ) ) {
 			return;
@@ -10,6 +19,19 @@ class CloseHub_Content_Abilities {
 
 		add_action( 'wp_abilities_api_categories_init', [ self::class, 'register_category' ] );
 		add_action( 'wp_abilities_api_init', [ self::class, 'register_abilities' ] );
+		add_filter( 'mcp_adapter_default_server_config', [ self::class, 'add_tools_to_default_server' ] );
+	}
+
+	/**
+	 * Add CloseHub abilities to the default MCP server's tool list.
+	 *
+	 * The MCP Adapter auto-discovers resources and prompts, but its default
+	 * server does not auto-discover abilities whose MCP type is "tool".
+	 */
+	public static function add_tools_to_default_server( array $config ): array {
+		$config['tools'] = array_values( array_unique( array_merge( $config['tools'] ?? [], self::MCP_TOOL_ABILITIES ) ) );
+
+		return $config;
 	}
 
 	public static function register_category(): void {

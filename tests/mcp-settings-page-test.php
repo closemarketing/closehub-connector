@@ -21,6 +21,11 @@ function wp_nonce_field( string $action ): void { echo '<input type="hidden" nam
 function submit_button( string $text, string $type = 'primary', string $name = 'submit', bool $wrap = true ): void { echo '<button class="button ' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '">' . esc_html( $text ) . '</button>'; }
 function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 
+class CloseHub_OAuth {
+	public static bool $metadata_needs_regeneration = true;
+	public static function well_known_files_need_regeneration(): bool { return self::$metadata_needs_regeneration; }
+}
+
 require_once dirname( __DIR__ ) . '/includes/class-admin.php';
 
 function closehub_test_assert( bool $condition, string $message ): void {
@@ -51,5 +56,12 @@ closehub_test_assert( false !== strpos( $output, 'Always required' ), 'The Claud
 closehub_test_assert( false !== strpos( $output, 'Anthropic’s hosted client metadata' ), 'The Claude OAuth client instruction is missing.' );
 closehub_test_assert( false !== strpos( $output, 'closehub_regenerate_oauth_metadata' ), 'The OAuth metadata regeneration action is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Regenerate OAuth Metadata' ), 'The OAuth metadata regeneration button is missing.' );
+closehub_test_assert( false !== strpos( $output, 'OAuth discovery metadata is missing, out of date, or cannot be updated' ), 'The OAuth metadata warning is missing when regeneration is required.' );
+
+CloseHub_OAuth::$metadata_needs_regeneration = false;
+ob_start();
+$section->invoke( new CloseHub_Admin() );
+$healthy_output = (string) ob_get_clean();
+closehub_test_assert( false === strpos( $healthy_output, 'OAuth discovery metadata is missing, out of date, or cannot be updated' ), 'The OAuth metadata warning must be hidden when both files are current.' );
 
 echo "MCP settings page checks passed.\n";

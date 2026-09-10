@@ -118,13 +118,16 @@ CloseHub_OAuth::ensure_well_known_files();
 
 $resource_metadata = json_decode( (string) file_get_contents( $resource_file ), true );
 $server_metadata   = json_decode( (string) file_get_contents( $server_file ), true );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'Current static metadata must not require regeneration.' );
 closehub_test_assert( 'https://example.test/wp-json/mcp/mcp-adapter-default-server' === $resource_metadata['resource'], 'Static protected-resource metadata must identify the CloseHub MCP endpoint.' );
 closehub_test_assert( [ 'https://example.test' ] === $resource_metadata['authorization_servers'], 'Static protected-resource metadata must identify the CloseHub OAuth server.' );
 closehub_test_assert( 'https://example.test/wp-json/closehub-oauth/v1/register' === $server_metadata['registration_endpoint'], 'Static authorization-server metadata must expose CloseHub dynamic registration.' );
 
 file_put_contents( $resource_file, '{"stale":true}' );
+closehub_test_assert( CloseHub_OAuth::well_known_files_need_regeneration(), 'Stale static metadata must require regeneration.' );
 CloseHub_OAuth::ensure_well_known_files();
 closehub_test_assert( ! isset( json_decode( (string) file_get_contents( $resource_file ), true )['stale'] ), 'Static metadata must replace stale discovery data from a previous plugin.' );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'Regenerated static metadata must not require further regeneration.' );
 
 unlink( $resource_file );
 unlink( $server_file );

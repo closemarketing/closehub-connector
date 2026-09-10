@@ -16,6 +16,7 @@ class CloseHub_OAuth {
 		// sending JSON — so this must run before any plugin using the default
 		// priority (10) or another low-but-not-minimal one.
 		add_action( 'init', [ self::class, 'well_known' ], PHP_INT_MIN );
+		add_action( 'init', [ self::class, 'maybe_regenerate_well_known_files' ], PHP_INT_MAX );
 		add_action( 'rest_api_init', [ self::class, 'routes' ] );
 		add_filter( 'rest_authentication_errors', [ self::class, 'authenticate' ], 5 );
 		add_filter( 'rest_pre_serve_request', [ self::class, 'serve_html_response' ], 10, 4 );
@@ -49,7 +50,7 @@ class CloseHub_OAuth {
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
 		update_option( 'closehub_oauth_db_version', self::DB_VERSION, false );
-		self::ensure_well_known_files();
+		update_option( 'closehub_oauth_metadata_needs_regeneration', true, false );
 	}
 
 	private static function maybe_upgrade(): void {
@@ -98,8 +99,39 @@ class CloseHub_OAuth {
 			return;
 		}
 
-		self::write_well_known_file( $directory . '/oauth-protected-resource', self::resource_data() );
-		self::write_well_known_file( $directory . '/oauth-authorization-server', self::server_data() );
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			self::write_well_known_file( $directory . '/' . $filename, $metadata );
+		}
+	}
+
+	/** Generate pending metadata once WordPress has initialized its REST URLs. */
+	public static function maybe_regenerate_well_known_files(): void {
+		if ( ! get_option( 'closehub_oauth_metadata_needs_regeneration', false ) ) {
+			return;
+		}
+
+		self::ensure_well_known_files();
+		if ( ! self::well_known_files_need_regeneration() ) {
+			delete_option( 'closehub_oauth_metadata_needs_regeneration' );
+		}
+	}
+
+	/** Whether static OAuth discovery metadata is missing, stale, or unwritable. */
+	public static function well_known_files_need_regeneration(): bool {
+		$directory = ABSPATH . '.well-known';
+		if ( ! is_dir( $directory ) || ! is_readable( $directory ) || ! is_writable( $directory ) ) {
+			return true;
+		}
+
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			$path = $directory . '/' . $filename;
+			$json = self::well_known_json( $metadata );
+			if ( false === $json || ! is_file( $path ) || ! is_readable( $path ) || ! is_writable( $path ) || file_get_contents( $path ) !== $json ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	public static function register_client( WP_REST_Request $request ): WP_REST_Response|WP_Error {
@@ -291,8 +323,10 @@ class CloseHub_OAuth {
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }
 	private static function hash( string $value ): string { return hash( 'sha256', $value ); }
+	private static function well_known_metadata(): array { return [ 'oauth-protected-resource' => self::resource_data(), 'oauth-authorization-server' => self::server_data() ]; }
+	private static function well_known_json( array $metadata ): string|false { return wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ); }
 	private static function write_well_known_file( string $path, array $metadata ): void {
-		$json = wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+		$json = self::well_known_json( $metadata );
 		if ( false !== $json && ( ! file_exists( $path ) || file_get_contents( $path ) !== $json ) ) {
 			file_put_contents( $path, $json );
 		}

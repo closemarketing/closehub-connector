@@ -289,11 +289,15 @@ class CloseHub_Admin {
 	private function render_mcp_section(): void {
 		$mcp_url           = self::get_mcp_server_url();
 		$adapter_available = class_exists( '\\WP\\MCP\\Plugin' );
+		$metadata_needs_regeneration = CloseHub_OAuth::well_known_files_need_regeneration();
 		$notice            = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
 		?>
 		<h2><?php esc_html_e( 'MCP', 'closehub-connector' ); ?></h2>
 		<?php if ( 'oauth_metadata_regenerated' === $notice ) : ?>
 			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'OAuth discovery metadata regenerated successfully.', 'closehub-connector' ); ?></p></div>
+		<?php endif; ?>
+		<?php if ( $metadata_needs_regeneration ) : ?>
+			<div class="notice notice-warning"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it below before connecting an MCP client.', 'closehub-connector' ); ?></p></div>
 		<?php endif; ?>
 		<p><?php esc_html_e( 'Use this URL to connect an MCP client to this WordPress site.', 'closehub-connector' ); ?></p>
 		<table class="form-table" role="presentation">

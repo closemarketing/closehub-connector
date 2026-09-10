@@ -33,6 +33,10 @@ function plugins_url( string $path, string $plugin ): string { return 'https://e
 function wp_parse_url( string $url, ?int $component = null ) { return parse_url( $url, $component ?? -1 ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
 function rest_get_url_prefix(): string { return 'wp-json'; }
 function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
+$GLOBALS['closehub_test_is_multisite'] = false;
+$GLOBALS['closehub_test_is_main_site'] = true;
+function is_multisite(): bool { return $GLOBALS['closehub_test_is_multisite']; }
+function is_main_site(): bool { return $GLOBALS['closehub_test_is_main_site']; }
 function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
 function esc_url_raw( string $url ): string { return $url; }
 function sanitize_text_field( string $text ): string { return $text; }
@@ -178,5 +182,34 @@ closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'R
 unlink( $resource_file );
 unlink( $server_file );
 rmdir( $well_known_directory );
+
+// ── static .well-known files use DOCUMENT_ROOT, not ABSPATH ────────────────
+// A subdirectory install (WordPress core one level below the site's public
+// web root) must write where the web server actually serves .well-known
+// from, not inside the WordPress core directory.
+
+$document_root = sys_get_temp_dir() . '/closehub-oauth-test-docroot-' . uniqid();
+mkdir( $document_root, 0755, true );
+$_SERVER['DOCUMENT_ROOT'] = $document_root;
+
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( file_exists( $document_root . '/.well-known/oauth-protected-resource' ), 'Static metadata must be written under DOCUMENT_ROOT when it is available, not ABSPATH.' );
+
+array_map( 'unlink', glob( $document_root . '/.well-known/*' ) );
+rmdir( $document_root . '/.well-known' );
+rmdir( $document_root );
+unset( $_SERVER['DOCUMENT_ROOT'] );
+
+// ── static .well-known files are skipped on network subsites ───────────────
+// The filesystem location is shared network-wide; only the main site may
+// write it, or subsites would overwrite each other's discovery documents.
+
+$GLOBALS['closehub_test_is_multisite'] = true;
+$GLOBALS['closehub_test_is_main_site'] = false;
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( ! file_exists( $resource_file ), 'A network subsite must not write shared static .well-known files.' );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'A network subsite must not report shared static files as needing regeneration.' );
+$GLOBALS['closehub_test_is_multisite'] = false;
+$GLOBALS['closehub_test_is_main_site'] = true;
 
 echo "OAuth security checks passed.\n";

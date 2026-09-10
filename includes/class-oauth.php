@@ -6,7 +6,7 @@ defined( 'ABSPATH' ) || exit;
 class CloseHub_OAuth {
 	private const NS = 'closehub-oauth/v1';
 	private const SCOPE = 'mcp:tools';
-	private const DB_VERSION = '3';
+	private const DB_VERSION = '4';
 
 	public static function init(): void {
 		self::maybe_upgrade();
@@ -91,10 +91,20 @@ class CloseHub_OAuth {
 	 * Create static OAuth discovery documents for web servers that do not
 	 * route .well-known requests through WordPress (for example, nginx).
 	 *
+	 * Skipped on network subsites: `.well-known` is a single filesystem
+	 * location shared by every site on the network, so letting each subsite
+	 * regenerate it on its own `init` would make sites overwrite one
+	 * another's discovery documents with whichever site's `home_url()`
+	 * happened to run last. Only the main site writes it.
+	 *
 	 * @return void
 	 */
 	public static function ensure_well_known_files(): void {
-		$directory = ABSPATH . '.well-known';
+		if ( is_multisite() && ! is_main_site() ) {
+			return;
+		}
+
+		$directory = self::well_known_directory();
 		if ( ! is_dir( $directory ) && ! wp_mkdir_p( $directory ) ) {
 			return;
 		}
@@ -116,9 +126,29 @@ class CloseHub_OAuth {
 		}
 	}
 
+	/**
+	 * The filesystem directory the web server actually serves `.well-known`
+	 * requests from. `ABSPATH` is WordPress core's directory, which is only
+	 * the site's document root for a root install; a subdirectory install
+	 * (WordPress in `/wordpress` with the site served from one level up)
+	 * would otherwise write files nginx never reaches. `DOCUMENT_ROOT` is
+	 * the server's own answer to "where does this site's web root live", so
+	 * prefer it whenever present.
+	 */
+	private static function well_known_directory(): string {
+		$document_root = (string) ( $_SERVER['DOCUMENT_ROOT'] ?? '' );
+		$base          = '' !== $document_root ? rtrim( $document_root, '/' ) . '/' : ABSPATH;
+
+		return $base . '.well-known';
+	}
+
 	/** Whether static OAuth discovery metadata is missing, stale, or unwritable. */
 	public static function well_known_files_need_regeneration(): bool {
-		$directory = ABSPATH . '.well-known';
+		if ( is_multisite() && ! is_main_site() ) {
+			return false;
+		}
+
+		$directory = self::well_known_directory();
 		if ( ! is_dir( $directory ) || ! is_readable( $directory ) || ! is_writable( $directory ) ) {
 			return true;
 		}

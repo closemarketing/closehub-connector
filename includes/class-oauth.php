@@ -49,6 +49,7 @@ class CloseHub_OAuth {
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
 		update_option( 'closehub_oauth_db_version', self::DB_VERSION, false );
+		self::ensure_well_known_files();
 	}
 
 	private static function maybe_upgrade(): void {
@@ -83,6 +84,22 @@ class CloseHub_OAuth {
 		if ( '' !== $base && str_starts_with( $uri, $base ) ) { $uri = substr( $uri, strlen( $base ) ); }
 		if ( '/.well-known/oauth-protected-resource' === $uri ) { wp_send_json( self::resource_data() ); }
 		if ( '/.well-known/oauth-authorization-server' === $uri ) { wp_send_json( self::server_data() ); }
+	}
+
+	/**
+	 * Create static OAuth discovery documents for web servers that do not
+	 * route .well-known requests through WordPress (for example, nginx).
+	 *
+	 * @return void
+	 */
+	public static function ensure_well_known_files(): void {
+		$directory = ABSPATH . '.well-known';
+		if ( ! is_dir( $directory ) && ! wp_mkdir_p( $directory ) ) {
+			return;
+		}
+
+		self::write_well_known_file( $directory . '/oauth-protected-resource', self::resource_data() );
+		self::write_well_known_file( $directory . '/oauth-authorization-server', self::server_data() );
 	}
 
 	public static function register_client( WP_REST_Request $request ): WP_REST_Response|WP_Error {
@@ -274,5 +291,11 @@ class CloseHub_OAuth {
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }
 	private static function hash( string $value ): string { return hash( 'sha256', $value ); }
+	private static function write_well_known_file( string $path, array $metadata ): void {
+		$json = wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+		if ( false !== $json && ( ! file_exists( $path ) || file_get_contents( $path ) !== $json ) ) {
+			file_put_contents( $path, $json );
+		}
+	}
 	private static function error( string $code, string $message, int $status = 400 ): WP_Error { return new WP_Error( $code, $message, [ 'status' => $status ] ); }
 }

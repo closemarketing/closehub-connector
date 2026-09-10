@@ -30,6 +30,8 @@ function home_url( string $path = '' ): string { return 'https://example.test' .
 function rest_url( string $path = '' ): string { return 'https://example.test/wp-json/' . ltrim( $path, '/' ); }
 function wp_parse_url( string $url, ?int $component = null ) { return parse_url( $url, $component ?? -1 ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
 function rest_get_url_prefix(): string { return 'wp-json'; }
+function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
+function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
 
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
@@ -96,5 +98,36 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 	);
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
+
+// ── static .well-known metadata for nginx hosts ─────────────────────────────
+
+$well_known_directory = ABSPATH . '.well-known';
+$resource_file         = $well_known_directory . '/oauth-protected-resource';
+$server_file           = $well_known_directory . '/oauth-authorization-server';
+
+foreach ( [ $resource_file, $server_file ] as $file ) {
+	if ( file_exists( $file ) ) {
+		unlink( $file );
+	}
+}
+if ( is_dir( $well_known_directory ) ) {
+	rmdir( $well_known_directory );
+}
+
+CloseHub_OAuth::ensure_well_known_files();
+
+$resource_metadata = json_decode( (string) file_get_contents( $resource_file ), true );
+$server_metadata   = json_decode( (string) file_get_contents( $server_file ), true );
+closehub_test_assert( 'https://example.test/wp-json/mcp/mcp-adapter-default-server' === $resource_metadata['resource'], 'Static protected-resource metadata must identify the CloseHub MCP endpoint.' );
+closehub_test_assert( [ 'https://example.test' ] === $resource_metadata['authorization_servers'], 'Static protected-resource metadata must identify the CloseHub OAuth server.' );
+closehub_test_assert( 'https://example.test/wp-json/closehub-oauth/v1/register' === $server_metadata['registration_endpoint'], 'Static authorization-server metadata must expose CloseHub dynamic registration.' );
+
+file_put_contents( $resource_file, '{"stale":true}' );
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( ! isset( json_decode( (string) file_get_contents( $resource_file ), true )['stale'] ), 'Static metadata must replace stale discovery data from a previous plugin.' );
+
+unlink( $resource_file );
+unlink( $server_file );
+rmdir( $well_known_directory );
 
 echo "OAuth security checks passed.\n";

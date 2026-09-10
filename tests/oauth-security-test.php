@@ -3,6 +3,7 @@
 declare( strict_types=1 );
 
 define( 'ABSPATH', __DIR__ . '/' );
+define( 'CLOSEHUB_PLUGIN_FILE', dirname( __DIR__ ) . '/closehub-connector.php' );
 
 class WP_REST_Server { const READABLE = 'GET'; const CREATABLE = 'POST'; }
 class WP_REST_Response {
@@ -28,8 +29,30 @@ function add_action( ...$args ): void {}
 function add_filter( ...$args ): void {}
 function home_url( string $path = '' ): string { return 'https://example.test' . $path; }
 function rest_url( string $path = '' ): string { return 'https://example.test/wp-json/' . ltrim( $path, '/' ); }
+function plugins_url( string $path, string $plugin ): string { return 'https://example.test/wp-content/plugins/closehub-connector/' . ltrim( $path, '/' ); }
 function wp_parse_url( string $url, ?int $component = null ) { return parse_url( $url, $component ?? -1 ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
 function rest_get_url_prefix(): string { return 'wp-json'; }
+function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
+$GLOBALS['closehub_test_is_multisite'] = false;
+$GLOBALS['closehub_test_is_main_site'] = true;
+function is_multisite(): bool { return $GLOBALS['closehub_test_is_multisite']; }
+function is_main_site(): bool { return $GLOBALS['closehub_test_is_main_site']; }
+function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
+function esc_url_raw( string $url ): string { return $url; }
+function sanitize_text_field( string $text ): string { return $text; }
+function is_wp_error( $value ): bool { return false; }
+function wp_remote_retrieve_response_code( array $response ): int { return $response['response']['code']; }
+function wp_remote_retrieve_body( array $response ): string { return $response['body']; }
+function wp_safe_remote_get( string $url, array $args ): array {
+	global $closehub_test_client_metadata;
+	return [ 'response' => [ 'code' => 200 ], 'body' => wp_json_encode( $closehub_test_client_metadata[ $url ] ?? [] ) ];
+}
+function esc_html_e( string $text ): void { echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_url( string $url ): string { return $url; }
+function esc_html__( string $text ): string { return $text; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $action ) . '">'; }
 
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
@@ -55,6 +78,35 @@ closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://localhost:1234
 closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://127.0.0.1/callback' ), 'An http://127.0.0.1 redirect URI must be valid.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'http://attacker.example/callback' ), 'A plain-http non-localhost redirect URI must be rejected.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'javascript:alert(1)' ), 'A javascript: redirect URI must be rejected.' );
+
+$oauth_server_metadata = CloseHub_OAuth::server_metadata()->get_data();
+closehub_test_assert( true === $oauth_server_metadata['client_id_metadata_document_supported'], 'OAuth server metadata must advertise Client ID Metadata Document support for hosted MCP clients.' );
+
+// ── Client ID Metadata Documents (CIMD) ─────────────────────────────────────
+
+$claude_client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+$closehub_test_client_metadata = [
+	$claude_client_id => [
+		'client_id' => $claude_client_id,
+		'client_name' => 'Claude',
+		'redirect_uris' => [ 'https://claude.ai/api/mcp/auth_callback' ],
+	],
+];
+$valid_authorize = new ReflectionMethod( CloseHub_OAuth::class, 'valid_authorize' );
+$valid_authorize->setAccessible( true );
+$cimd_client = $valid_authorize->invoke( null, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( is_array( $cimd_client ) && 'Claude' === $cimd_client['client_name'], 'A valid Client ID Metadata Document must authorize a hosted MCP client without prior dynamic registration.' );
+
+$invalid_cimd_client = $valid_authorize->invoke( null, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://attacker.example/callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A Client ID Metadata Document must reject an unlisted redirect URI.' );
+
+// ── consent page branding ───────────────────────────────────────────────────
+
+$consent_page = new ReflectionMethod( CloseHub_OAuth::class, 'consent_page' );
+$consent_page->setAccessible( true );
+$consent_response = $consent_page->invoke( null, $cimd_client, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( false !== strpos( $consent_response->get_data(), 'https://example.test/wp-content/plugins/closehub-connector/assets/logo-closehub.svg' ), 'The consent page must display the bundled CloseHub logo.' );
+closehub_test_assert( false !== strpos( $consent_response->get_data(), 'alt="CloseHub"' ), 'The CloseHub logo must have accessible alternative text.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of
@@ -96,5 +148,68 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 	);
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
+
+// ── static .well-known metadata for nginx hosts ─────────────────────────────
+
+$well_known_directory = ABSPATH . '.well-known';
+$resource_file         = $well_known_directory . '/oauth-protected-resource';
+$server_file           = $well_known_directory . '/oauth-authorization-server';
+
+foreach ( [ $resource_file, $server_file ] as $file ) {
+	if ( file_exists( $file ) ) {
+		unlink( $file );
+	}
+}
+if ( is_dir( $well_known_directory ) ) {
+	rmdir( $well_known_directory );
+}
+
+CloseHub_OAuth::ensure_well_known_files();
+
+$resource_metadata = json_decode( (string) file_get_contents( $resource_file ), true );
+$server_metadata   = json_decode( (string) file_get_contents( $server_file ), true );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'Current static metadata must not require regeneration.' );
+closehub_test_assert( 'https://example.test/wp-json/mcp/mcp-adapter-default-server' === $resource_metadata['resource'], 'Static protected-resource metadata must identify the CloseHub MCP endpoint.' );
+closehub_test_assert( [ 'https://example.test' ] === $resource_metadata['authorization_servers'], 'Static protected-resource metadata must identify the CloseHub OAuth server.' );
+closehub_test_assert( 'https://example.test/wp-json/closehub-oauth/v1/register' === $server_metadata['registration_endpoint'], 'Static authorization-server metadata must expose CloseHub dynamic registration.' );
+
+file_put_contents( $resource_file, '{"stale":true}' );
+closehub_test_assert( CloseHub_OAuth::well_known_files_need_regeneration(), 'Stale static metadata must require regeneration.' );
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( ! isset( json_decode( (string) file_get_contents( $resource_file ), true )['stale'] ), 'Static metadata must replace stale discovery data from a previous plugin.' );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'Regenerated static metadata must not require further regeneration.' );
+
+unlink( $resource_file );
+unlink( $server_file );
+rmdir( $well_known_directory );
+
+// ── static .well-known files use DOCUMENT_ROOT, not ABSPATH ────────────────
+// A subdirectory install (WordPress core one level below the site's public
+// web root) must write where the web server actually serves .well-known
+// from, not inside the WordPress core directory.
+
+$document_root = sys_get_temp_dir() . '/closehub-oauth-test-docroot-' . uniqid();
+mkdir( $document_root, 0755, true );
+$_SERVER['DOCUMENT_ROOT'] = $document_root;
+
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( file_exists( $document_root . '/.well-known/oauth-protected-resource' ), 'Static metadata must be written under DOCUMENT_ROOT when it is available, not ABSPATH.' );
+
+array_map( 'unlink', glob( $document_root . '/.well-known/*' ) );
+rmdir( $document_root . '/.well-known' );
+rmdir( $document_root );
+unset( $_SERVER['DOCUMENT_ROOT'] );
+
+// ── static .well-known files are skipped on network subsites ───────────────
+// The filesystem location is shared network-wide; only the main site may
+// write it, or subsites would overwrite each other's discovery documents.
+
+$GLOBALS['closehub_test_is_multisite'] = true;
+$GLOBALS['closehub_test_is_main_site'] = false;
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( ! file_exists( $resource_file ), 'A network subsite must not write shared static .well-known files.' );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'A network subsite must not report shared static files as needing regeneration.' );
+$GLOBALS['closehub_test_is_multisite'] = false;
+$GLOBALS['closehub_test_is_main_site'] = true;
 
 echo "OAuth security checks passed.\n";

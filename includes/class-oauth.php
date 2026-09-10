@@ -6,11 +6,17 @@ defined( 'ABSPATH' ) || exit;
 class CloseHub_OAuth {
 	private const NS = 'closehub-oauth/v1';
 	private const SCOPE = 'mcp:tools';
-	private const DB_VERSION = '3';
+	private const DB_VERSION = '4';
 
 	public static function init(): void {
 		self::maybe_upgrade();
-		add_action( 'init', [ self::class, 'well_known' ], 1 );
+		// Priority PHP_INT_MIN: another plugin (or WP core's own MCP support)
+		// may register a competing handler for the same well-known paths on
+		// `init`. Whichever handler runs first wins, since both `exit` after
+		// sending JSON — so this must run before any plugin using the default
+		// priority (10) or another low-but-not-minimal one.
+		add_action( 'init', [ self::class, 'well_known' ], PHP_INT_MIN );
+		add_action( 'init', [ self::class, 'maybe_regenerate_well_known_files' ], PHP_INT_MAX );
 		add_action( 'rest_api_init', [ self::class, 'routes' ] );
 		add_filter( 'rest_authentication_errors', [ self::class, 'authenticate' ], 5 );
 		add_filter( 'rest_pre_serve_request', [ self::class, 'serve_html_response' ], 10, 4 );
@@ -44,6 +50,7 @@ class CloseHub_OAuth {
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
 		update_option( 'closehub_oauth_db_version', self::DB_VERSION, false );
+		update_option( 'closehub_oauth_metadata_needs_regeneration', true, false );
 	}
 
 	private static function maybe_upgrade(): void {
@@ -80,6 +87,83 @@ class CloseHub_OAuth {
 		if ( '/.well-known/oauth-authorization-server' === $uri ) { wp_send_json( self::server_data() ); }
 	}
 
+	/**
+	 * Create static OAuth discovery documents for web servers that do not
+	 * route .well-known requests through WordPress (for example, nginx).
+	 *
+	 * Skipped on network subsites: `.well-known` is a single filesystem
+	 * location shared by every site on the network, so letting each subsite
+	 * regenerate it on its own `init` would make sites overwrite one
+	 * another's discovery documents with whichever site's `home_url()`
+	 * happened to run last. Only the main site writes it.
+	 *
+	 * @return void
+	 */
+	public static function ensure_well_known_files(): void {
+		if ( is_multisite() && ! is_main_site() ) {
+			return;
+		}
+
+		$directory = self::well_known_directory();
+		if ( ! is_dir( $directory ) && ! wp_mkdir_p( $directory ) ) {
+			return;
+		}
+
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			self::write_well_known_file( $directory . '/' . $filename, $metadata );
+		}
+	}
+
+	/** Generate pending metadata once WordPress has initialized its REST URLs. */
+	public static function maybe_regenerate_well_known_files(): void {
+		if ( ! get_option( 'closehub_oauth_metadata_needs_regeneration', false ) ) {
+			return;
+		}
+
+		self::ensure_well_known_files();
+		if ( ! self::well_known_files_need_regeneration() ) {
+			delete_option( 'closehub_oauth_metadata_needs_regeneration' );
+		}
+	}
+
+	/**
+	 * The filesystem directory the web server actually serves `.well-known`
+	 * requests from. `ABSPATH` is WordPress core's directory, which is only
+	 * the site's document root for a root install; a subdirectory install
+	 * (WordPress in `/wordpress` with the site served from one level up)
+	 * would otherwise write files nginx never reaches. `DOCUMENT_ROOT` is
+	 * the server's own answer to "where does this site's web root live", so
+	 * prefer it whenever present.
+	 */
+	private static function well_known_directory(): string {
+		$document_root = (string) ( $_SERVER['DOCUMENT_ROOT'] ?? '' );
+		$base          = '' !== $document_root ? rtrim( $document_root, '/' ) . '/' : ABSPATH;
+
+		return $base . '.well-known';
+	}
+
+	/** Whether static OAuth discovery metadata is missing, stale, or unwritable. */
+	public static function well_known_files_need_regeneration(): bool {
+		if ( is_multisite() && ! is_main_site() ) {
+			return false;
+		}
+
+		$directory = self::well_known_directory();
+		if ( ! is_dir( $directory ) || ! is_readable( $directory ) || ! is_writable( $directory ) ) {
+			return true;
+		}
+
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			$path = $directory . '/' . $filename;
+			$json = self::well_known_json( $metadata );
+			if ( false === $json || ! is_file( $path ) || ! is_readable( $path ) || ! is_writable( $path ) || file_get_contents( $path ) !== $json ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	public static function register_client( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		$throttled = self::throttle_registration();
 		if ( $throttled ) { return $throttled; }
@@ -87,11 +171,8 @@ class CloseHub_OAuth {
 		if ( ! is_array( $data ) ) { return self::error( 'invalid_client_metadata', 'Client metadata must be JSON.' ); }
 		$metadata_client_id = esc_url_raw( (string) ( $data['client_id'] ?? '' ) );
 		if ( '' !== $metadata_client_id ) {
-			if ( ! str_starts_with( $metadata_client_id, 'https://' ) ) { return self::error( 'invalid_client_metadata', 'client_id metadata must use HTTPS.' ); }
-			$response = wp_safe_remote_get( $metadata_client_id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
-			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return self::error( 'invalid_client_metadata', 'Could not retrieve the Client ID metadata document.' ); }
-			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
-			if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $metadata_client_id, (string) $metadata['client_id'] ) ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
+			$metadata = self::client_metadata( $metadata_client_id );
+			if ( ! $metadata ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
 			// The fetched, verified document is the client's identity — an
 			// unauthenticated request body must not be able to override its
 			// client_name or redirect_uris (e.g. naming a real client_id
@@ -193,11 +274,31 @@ class CloseHub_OAuth {
 	// in an already-escaping context (esc_attr(), add_query_arg()), never
 	// rendered as raw HTML, so leaving them unsanitized here is safe.
 	private static function params( WP_REST_Request $r ): array { return [ 'response_type' => sanitize_text_field( (string) $r->get_param( 'response_type' ) ), 'client_id' => (string) $r->get_param( 'client_id' ), 'redirect_uri' => esc_url_raw( (string) $r->get_param( 'redirect_uri' ) ), 'state' => (string) $r->get_param( 'state' ), 'challenge' => sanitize_text_field( (string) $r->get_param( 'code_challenge' ) ), 'method' => sanitize_text_field( (string) $r->get_param( 'code_challenge_method' ) ) ]; }
-	private static function valid_authorize( array $p ): array|WP_Error { $c = self::client( $p['client_id'] ); if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); } return $c; }
+	private static function valid_authorize( array $p ): array|WP_Error {
+		// Hosted MCP clients use a URL as the client_id. CIMD clients are not
+		// pre-registered: their verified metadata is their registration.
+		$c = str_starts_with( $p['client_id'], 'https://' ) ? self::client_metadata( $p['client_id'] ) : self::client( $p['client_id'] );
+		if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+		return $c;
+	}
+	private static function client_metadata( string $id ): ?array {
+		if ( ! str_starts_with( $id, 'https://' ) ) { return null; }
+		$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
+		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
+		$name = sanitize_text_field( (string) ( $metadata['client_name'] ?? '' ) );
+		$uris = $metadata['redirect_uris'] ?? [];
+		if ( '' === $name || ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return null; }
+		foreach ( $uris as $uri ) { if ( ! is_string( $uri ) ) { return null; } }
+		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
+		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return null; } }
+		return [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris ];
+	}
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
 	private static function resource_data(): array { return [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ self::SCOPE ] ]; }
-	private static function server_data(): array { return [ 'issuer' => home_url(), 'authorization_endpoint' => rest_url( self::NS . '/authorize' ), 'token_endpoint' => rest_url( self::NS . '/token' ), 'registration_endpoint' => rest_url( self::NS . '/register' ), 'revocation_endpoint' => rest_url( self::NS . '/revoke' ), 'response_types_supported' => [ 'code' ], 'grant_types_supported' => [ 'authorization_code', 'refresh_token' ], 'token_endpoint_auth_methods_supported' => [ 'none' ], 'code_challenge_methods_supported' => [ 'S256' ], 'scopes_supported' => [ self::SCOPE ] ]; }
+	private static function server_data(): array { return [ 'issuer' => home_url(), 'authorization_endpoint' => rest_url( self::NS . '/authorize' ), 'token_endpoint' => rest_url( self::NS . '/token' ), 'registration_endpoint' => rest_url( self::NS . '/register' ), 'revocation_endpoint' => rest_url( self::NS . '/revoke' ), 'response_types_supported' => [ 'code' ], 'grant_types_supported' => [ 'authorization_code', 'refresh_token' ], 'token_endpoint_auth_methods_supported' => [ 'none' ], 'client_id_metadata_document_supported' => true, 'code_challenge_methods_supported' => [ 'S256' ], 'scopes_supported' => [ self::SCOPE ] ]; }
 	private static function restore_user(): void { if ( ! is_user_logged_in() ) { $id = wp_validate_auth_cookie( '', 'logged_in' ); if ( $id ) { wp_set_current_user( $id ); } } }
 	private static function redirect( string $url, array $args ): void { wp_redirect( add_query_arg( $args, $url ) ); exit; }
 	/**
@@ -208,7 +309,11 @@ class CloseHub_OAuth {
 	 */
 	private static function consent_page( array $client, array $p ): WP_REST_Response {
 		ob_start();
-		?><!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></title><style>body{font:16px system-ui;background:#f0f0f1;color:#1d2327;margin:0;display:grid;place-items:center;min-height:100vh}.card{background:#fff;padding:32px;border-radius:8px;max-width:480px;box-shadow:0 1px 3px #0002}button{padding:10px 16px;margin-right:8px}</style></head><body><main class="card"><h1><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></h1><p><?php printf( esc_html__( '%s requests access to this WordPress site.', 'closehub-connector' ), esc_html( $client['client_name'] ) ); ?></p><p><?php esc_html_e( 'It will act with the permissions of your current WordPress account.', 'closehub-connector' ); ?></p><form method="post" action="<?php echo esc_url( rest_url( self::NS . '/authorize' ) ); ?>"><?php wp_nonce_field( 'closehub_oauth_authorize', 'closehub_oauth_nonce' ); foreach ( $p as $key => $value ) : ?><input type="hidden" name="<?php echo esc_attr( $key === 'challenge' ? 'code_challenge' : ( $key === 'method' ? 'code_challenge_method' : $key ) ); ?>" value="<?php echo esc_attr( $value ); ?>"><?php endforeach; ?><button name="decision" value="approve"><?php esc_html_e( 'Authorize', 'closehub-connector' ); ?></button><button name="decision" value="deny"><?php esc_html_e( 'Deny', 'closehub-connector' ); ?></button></form></main></body></html><?php
+		?>
+		<!doctype html>
+		<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></title><style>body{font:16px system-ui;background:#f0f0f1;color:#1d2327;margin:0;display:grid;place-items:center;min-height:100vh}.card{background:#fff;padding:32px;border-radius:8px;max-width:480px;box-shadow:0 1px 3px #0002}.closehub-logo{display:block;width:160px;height:auto;margin:0 0 28px}button{padding:10px 16px;margin-right:8px}</style></head>
+		<body><main class="card"><img class="closehub-logo" src="<?php echo esc_url( plugins_url( 'assets/logo-closehub.svg', CLOSEHUB_PLUGIN_FILE ) ); ?>" alt="CloseHub"><h1><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></h1><p><?php printf( esc_html__( '%s requests access to this WordPress site.', 'closehub-connector' ), esc_html( $client['client_name'] ) ); ?></p><p><?php esc_html_e( 'It will act with the permissions of your current WordPress account.', 'closehub-connector' ); ?></p><form method="post" action="<?php echo esc_url( rest_url( self::NS . '/authorize' ) ); ?>"><?php wp_nonce_field( 'closehub_oauth_authorize', 'closehub_oauth_nonce' ); foreach ( $p as $key => $value ) : ?><input type="hidden" name="<?php echo esc_attr( $key === 'challenge' ? 'code_challenge' : ( $key === 'method' ? 'code_challenge_method' : $key ) ); ?>" value="<?php echo esc_attr( $value ); ?>"><?php endforeach; ?><button name="decision" value="approve"><?php esc_html_e( 'Authorize', 'closehub-connector' ); ?></button><button name="decision" value="deny"><?php esc_html_e( 'Deny', 'closehub-connector' ); ?></button></form></main></body></html>
+		<?php
 		$html = (string) ob_get_clean();
 
 		$response = new WP_REST_Response( $html, 200 );
@@ -269,5 +374,13 @@ class CloseHub_OAuth {
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }
 	private static function hash( string $value ): string { return hash( 'sha256', $value ); }
+	private static function well_known_metadata(): array { return [ 'oauth-protected-resource' => self::resource_data(), 'oauth-authorization-server' => self::server_data() ]; }
+	private static function well_known_json( array $metadata ): string|false { return wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ); }
+	private static function write_well_known_file( string $path, array $metadata ): void {
+		$json = self::well_known_json( $metadata );
+		if ( false !== $json && ( ! file_exists( $path ) || file_get_contents( $path ) !== $json ) ) {
+			file_put_contents( $path, $json );
+		}
+	}
 	private static function error( string $code, string $message, int $status = 400 ): WP_Error { return new WP_Error( $code, $message, [ 'status' => $status ] ); }
 }

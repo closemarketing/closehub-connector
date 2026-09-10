@@ -8,11 +8,13 @@ class CloseHub_Admin {
 		if ( is_multisite() ) {
 			add_action( 'network_admin_menu', [ $this, 'add_network_menu' ] );
 			add_action( 'admin_init', [ $this, 'handle_network_regenerate' ] );
+			add_action( 'admin_init', [ $this, 'handle_network_regenerate_oauth_metadata' ] );
 			return;
 		}
 
 		add_action( 'admin_menu', [ $this, 'add_menu' ] );
 		add_action( 'admin_init', [ $this, 'handle_regenerate' ] );
+		add_action( 'admin_init', [ $this, 'handle_regenerate_oauth_metadata' ] );
 	}
 
 	public function add_menu(): void {
@@ -35,6 +37,20 @@ class CloseHub_Admin {
 		}
 		CloseHub_API_Key::regenerate();
 		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', menu_page_url( 'closehub-connector', false ) ) );
+		exit;
+	}
+
+	/** Regenerate static OAuth discovery metadata for nginx-hosted sites. */
+	public function handle_regenerate_oauth_metadata(): void {
+		if ( ! isset( $_POST['closehub_regenerate_oauth_metadata'] ) ) {
+			return;
+		}
+		check_admin_referer( 'closehub_regenerate_oauth_metadata' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
+		}
+		CloseHub_OAuth::ensure_well_known_files();
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'oauth_metadata_regenerated', menu_page_url( 'closehub-connector', false ) ) );
 		exit;
 	}
 
@@ -149,6 +165,20 @@ class CloseHub_Admin {
 		exit;
 	}
 
+	/** Regenerate static OAuth discovery metadata for the network site. */
+	public function handle_network_regenerate_oauth_metadata(): void {
+		if ( ! is_network_admin() || ! isset( $_POST['closehub_regenerate_oauth_metadata'] ) ) {
+			return;
+		}
+		check_admin_referer( 'closehub_regenerate_oauth_metadata' );
+		if ( ! current_user_can( 'manage_network_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
+		}
+		CloseHub_OAuth::ensure_well_known_files();
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'oauth_metadata_regenerated', network_admin_url( 'settings.php?page=closehub-connector' ) ) );
+		exit;
+	}
+
 	public function render_network_page(): void {
 		if ( ! current_user_can( 'manage_network_options' ) ) {
 			return;
@@ -259,8 +289,16 @@ class CloseHub_Admin {
 	private function render_mcp_section(): void {
 		$mcp_url           = self::get_mcp_server_url();
 		$adapter_available = class_exists( '\\WP\\MCP\\Plugin' );
+		$metadata_needs_regeneration = CloseHub_OAuth::well_known_files_need_regeneration();
+		$notice            = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
 		?>
 		<h2><?php esc_html_e( 'MCP', 'closehub-connector' ); ?></h2>
+		<?php if ( 'oauth_metadata_regenerated' === $notice ) : ?>
+			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'OAuth discovery metadata regenerated successfully.', 'closehub-connector' ); ?></p></div>
+		<?php endif; ?>
+		<?php if ( $metadata_needs_regeneration ) : ?>
+			<div class="notice notice-warning"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it below before connecting an MCP client.', 'closehub-connector' ); ?></p></div>
+		<?php endif; ?>
 		<p><?php esc_html_e( 'Use this URL to connect an MCP client to this WordPress site.', 'closehub-connector' ); ?></p>
 		<table class="form-table" role="presentation">
 			<tr>
@@ -291,6 +329,13 @@ class CloseHub_Admin {
 				</td>
 			</tr>
 		</table>
+		<h3><?php esc_html_e( 'OAuth Discovery Metadata', 'closehub-connector' ); ?></h3>
+		<p><?php esc_html_e( 'Regenerate the .well-known OAuth metadata files when your web server serves them directly instead of routing them through WordPress.', 'closehub-connector' ); ?></p>
+		<form method="post">
+			<?php wp_nonce_field( 'closehub_regenerate_oauth_metadata' ); ?>
+			<input type="hidden" name="closehub_regenerate_oauth_metadata" value="1" />
+			<?php submit_button( __( 'Regenerate OAuth Metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+		</form>
 		<?php
 	}
 }

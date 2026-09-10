@@ -41,6 +41,12 @@ function wp_safe_remote_get( string $url, array $args ): array {
 	global $closehub_test_client_metadata;
 	return [ 'response' => [ 'code' => 200 ], 'body' => wp_json_encode( $closehub_test_client_metadata[ $url ] ?? [] ) ];
 }
+function esc_html_e( string $text ): void { echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_url( string $url ): string { return $url; }
+function esc_html__( string $text ): string { return $text; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $action ) . '">'; }
 
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
@@ -87,6 +93,14 @@ closehub_test_assert( is_array( $cimd_client ) && 'Claude' === $cimd_client['cli
 
 $invalid_cimd_client = $valid_authorize->invoke( null, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://attacker.example/callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
 closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A Client ID Metadata Document must reject an unlisted redirect URI.' );
+
+// ── consent page branding ───────────────────────────────────────────────────
+
+$consent_page = new ReflectionMethod( CloseHub_OAuth::class, 'consent_page' );
+$consent_page->setAccessible( true );
+$consent_response = $consent_page->invoke( null, $cimd_client, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( false !== strpos( $consent_response->get_data(), 'https://app.close.marketing/images/logo-closehub.svg' ), 'The consent page must display the CloseHub logo.' );
+closehub_test_assert( false !== strpos( $consent_response->get_data(), 'alt="CloseHub"' ), 'The CloseHub logo must have accessible alternative text.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of

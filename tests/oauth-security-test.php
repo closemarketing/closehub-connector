@@ -32,6 +32,15 @@ function wp_parse_url( string $url, ?int $component = null ) { return parse_url(
 function rest_get_url_prefix(): string { return 'wp-json'; }
 function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
 function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
+function esc_url_raw( string $url ): string { return $url; }
+function sanitize_text_field( string $text ): string { return $text; }
+function is_wp_error( $value ): bool { return false; }
+function wp_remote_retrieve_response_code( array $response ): int { return $response['response']['code']; }
+function wp_remote_retrieve_body( array $response ): string { return $response['body']; }
+function wp_safe_remote_get( string $url, array $args ): array {
+	global $closehub_test_client_metadata;
+	return [ 'response' => [ 'code' => 200 ], 'body' => wp_json_encode( $closehub_test_client_metadata[ $url ] ?? [] ) ];
+}
 
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
@@ -60,6 +69,24 @@ closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'javascript:alert(1)
 
 $oauth_server_metadata = CloseHub_OAuth::server_metadata()->get_data();
 closehub_test_assert( true === $oauth_server_metadata['client_id_metadata_document_supported'], 'OAuth server metadata must advertise Client ID Metadata Document support for hosted MCP clients.' );
+
+// ── Client ID Metadata Documents (CIMD) ─────────────────────────────────────
+
+$claude_client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+$closehub_test_client_metadata = [
+	$claude_client_id => [
+		'client_id' => $claude_client_id,
+		'client_name' => 'Claude',
+		'redirect_uris' => [ 'https://claude.ai/api/mcp/auth_callback' ],
+	],
+];
+$valid_authorize = new ReflectionMethod( CloseHub_OAuth::class, 'valid_authorize' );
+$valid_authorize->setAccessible( true );
+$cimd_client = $valid_authorize->invoke( null, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( is_array( $cimd_client ) && 'Claude' === $cimd_client['client_name'], 'A valid Client ID Metadata Document must authorize a hosted MCP client without prior dynamic registration.' );
+
+$invalid_cimd_client = $valid_authorize->invoke( null, [ 'response_type' => 'code', 'client_id' => $claude_client_id, 'redirect_uri' => 'https://attacker.example/callback', 'state' => 'state', 'challenge' => $challenge, 'method' => 'S256' ] );
+closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A Client ID Metadata Document must reject an unlisted redirect URI.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of

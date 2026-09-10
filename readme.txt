@@ -94,7 +94,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 = 1.1.1 =
 * Fixed: OAuth discovery metadata now takes precedence over competing plugin handlers for the shared `.well-known` endpoints.
-* Fixed: OAuth metadata now advertises Client ID Metadata Document support for hosted MCP clients such as Claude.
+* Fixed: OAuth authorization now validates Client ID Metadata Documents for hosted MCP clients such as Claude.
 * Added a protected **Regenerate OAuth Metadata** action in Settings → CloseHub → MCP to recreate the static OAuth discovery documents required by nginx hosts.
 * Added a settings warning when OAuth discovery metadata is missing, stale, or cannot be regenerated.
 

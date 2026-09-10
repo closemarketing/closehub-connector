@@ -141,11 +141,8 @@ class CloseHub_OAuth {
 		if ( ! is_array( $data ) ) { return self::error( 'invalid_client_metadata', 'Client metadata must be JSON.' ); }
 		$metadata_client_id = esc_url_raw( (string) ( $data['client_id'] ?? '' ) );
 		if ( '' !== $metadata_client_id ) {
-			if ( ! str_starts_with( $metadata_client_id, 'https://' ) ) { return self::error( 'invalid_client_metadata', 'client_id metadata must use HTTPS.' ); }
-			$response = wp_safe_remote_get( $metadata_client_id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
-			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return self::error( 'invalid_client_metadata', 'Could not retrieve the Client ID metadata document.' ); }
-			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
-			if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $metadata_client_id, (string) $metadata['client_id'] ) ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
+			$metadata = self::client_metadata( $metadata_client_id );
+			if ( ! $metadata ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
 			// The fetched, verified document is the client's identity — an
 			// unauthenticated request body must not be able to override its
 			// client_name or redirect_uris (e.g. naming a real client_id
@@ -247,7 +244,27 @@ class CloseHub_OAuth {
 	// in an already-escaping context (esc_attr(), add_query_arg()), never
 	// rendered as raw HTML, so leaving them unsanitized here is safe.
 	private static function params( WP_REST_Request $r ): array { return [ 'response_type' => sanitize_text_field( (string) $r->get_param( 'response_type' ) ), 'client_id' => (string) $r->get_param( 'client_id' ), 'redirect_uri' => esc_url_raw( (string) $r->get_param( 'redirect_uri' ) ), 'state' => (string) $r->get_param( 'state' ), 'challenge' => sanitize_text_field( (string) $r->get_param( 'code_challenge' ) ), 'method' => sanitize_text_field( (string) $r->get_param( 'code_challenge_method' ) ) ]; }
-	private static function valid_authorize( array $p ): array|WP_Error { $c = self::client( $p['client_id'] ); if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); } return $c; }
+	private static function valid_authorize( array $p ): array|WP_Error {
+		// Hosted MCP clients use a URL as the client_id. CIMD clients are not
+		// pre-registered: their verified metadata is their registration.
+		$c = str_starts_with( $p['client_id'], 'https://' ) ? self::client_metadata( $p['client_id'] ) : self::client( $p['client_id'] );
+		if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+		return $c;
+	}
+	private static function client_metadata( string $id ): ?array {
+		if ( ! str_starts_with( $id, 'https://' ) ) { return null; }
+		$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
+		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
+		$name = sanitize_text_field( (string) ( $metadata['client_name'] ?? '' ) );
+		$uris = $metadata['redirect_uris'] ?? [];
+		if ( '' === $name || ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return null; }
+		foreach ( $uris as $uri ) { if ( ! is_string( $uri ) ) { return null; } }
+		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
+		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return null; } }
+		return [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris ];
+	}
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
 	private static function resource_data(): array { return [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ self::SCOPE ] ]; }

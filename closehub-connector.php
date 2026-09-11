@@ -3,7 +3,7 @@
  * Plugin Name:       CloseHub Connector
  * Plugin URI:        https://github.com/closemarketing/closehub-connector
  * Description:       Connect your WordPress site to CloseHub with a single API key and MCP content abilities.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Close Marketing
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CLOSEHUB_VERSION', '1.1.0' );
+define( 'CLOSEHUB_VERSION', '1.2.0' );
 define( 'CLOSEHUB_PLUGIN_FILE', __FILE__ );
 define( 'CLOSEHUB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -47,6 +47,7 @@ function closehub_init(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-rest-api.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-site-abilities.php';
 
 	( new CloseHub_REST_API() )->register();
 	( new CloseHub_Admin() )->register();
@@ -57,4 +58,5 @@ function closehub_init(): void {
 	}
 
 	CloseHub_Content_Abilities::register();
+	CloseHub_Site_Abilities::register();
 }

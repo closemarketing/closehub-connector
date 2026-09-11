@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -19,6 +19,22 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
 
 For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
+
+It also exposes a set of "site" abilities for the CLOSE web go-live checklist — configuration steps that used to be manual or wp-cli only. Each requires the WordPress capability noted below.
+
+**Available MCP site abilities:**
+
+* `closehub/search-replace-domain` (`manage_options`) — Replace `old_domain` with `new_domain` across post content, options, comments, and meta tables, re-serializing serialized values safely. Skips `wp_posts.guid`. Pass `dry_run: true` to preview the number of rows that would change per table without writing anything. Example: `{ "old_domain": "staging.example.com", "new_domain": "example.com" }`.
+* `closehub/set-robots-txt` (`manage_options`) — Write `content` to `robots.txt`, physically if the site root is writable, otherwise served virtually through the `robots_txt` filter. Example: `{ "content": "User-agent: *\nDisallow:\nSitemap: https://example.com/sitemap.xml" }`.
+* `closehub/set-post-noindex` (`edit_post` on the target `post_id`) — Set or clear the noindex robots meta for one post/page using whichever SEO plugin (Rank Math or Yoast) is active. Example: `{ "post_id": 42, "noindex": true }`.
+* `closehub/flush-permalinks` (`manage_options`) — Regenerate rewrite rules, equivalent to `wp rewrite flush`. Takes no parameters.
+* `closehub/get-htaccess` (`manage_options`, read-only) — Return whether `.htaccess` exists and its current content. Takes no parameters.
+* `closehub/set-site-settings` (`manage_options`) — Update the site timezone and/or admin email; at least one is required. Example: `{ "timezone": "Europe/Madrid", "admin_email": "client@example.com" }`.
+* `closehub/reassign-posts-author` (`edit_others_posts`) — Reassign every post of `post_type` (default `post`) from `from_author_id` to `to_author_id`, with a per-post success result. Example: `{ "from_author_id": 3, "to_author_id": 1 }`.
+* `closehub/install-wp-org-plugin` (`install_plugins`) — Install (without activating) a plugin from the WordPress.org plugin directory by `slug`. Example: `{ "slug": "two-factor" }`.
+* `closehub/list-unused-plugins` (`activate_plugins`, read-only) — List installed plugins that are not currently active, as removal candidates. Takes no parameters.
+* `closehub/update-plugins-and-core` (`update_plugins` and `update_core`) — Update every plugin with an available update and WordPress core to the latest version, with a per-plugin success result. Takes no parameters.
+* `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
 
 **What it replaces:**
 
@@ -87,6 +103,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.2.0 =
+* Added 11 MCP "site" abilities covering the CLOSE web go-live checklist: domain search-replace, robots.txt content, per-page noindex, permalink flush, `.htaccess` read, timezone/admin email, bulk post-author reassignment, WordPress.org plugin install, unused-plugin listing, plugin/core updates, and client user creation. See the Description section for the full list and required capabilities.
 
 = 1.1.0 =
 * Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.

@@ -373,9 +373,16 @@ class CloseHub_REST_API {
 	 * types that are only admin-manageable, not public content — e.g.
 	 * WooCommerce's post-based 'shop_order'/'shop_coupon', which register
 	 * 'show_ui' but 'public' => false and must go through WooCommerce's own
-	 * order/coupon APIs instead of generic post fields.
+	 * order/coupon APIs instead of generic post fields. 'attachment' is
+	 * excluded explicitly: it's both public and admin-manageable, but a
+	 * Media Library item isn't ordinary content — inserting/updating one
+	 * through these generic post fields, with no file involved, would leave
+	 * a broken attachment record instead of going through the Media API.
 	 */
 	public static function post_type_allowed( string $post_type ): bool {
+		if ( 'attachment' === $post_type ) {
+			return false;
+		}
 		$post_type_object = get_post_type_object( $post_type );
 		return null !== $post_type_object && $post_type_object->show_ui && $post_type_object->public;
 	}

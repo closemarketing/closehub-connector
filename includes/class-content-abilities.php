@@ -51,7 +51,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	public static function can_edit_posts( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'edit_posts' ); }
-	public static function can_create_post( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'edit_posts' ) && ( 'publish' !== ( $input['status'] ?? 'draft' ) || self::type_cap( $input['post_type'] ?? 'post', 'publish_posts' ) ); }
+	public static function can_create_post( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'create_posts' ) && ( 'publish' !== ( $input['status'] ?? 'draft' ) || self::type_cap( $input['post_type'] ?? 'post', 'publish_posts' ) ); }
 	public static function can_read_post( $input ): bool { return current_user_can( 'read_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_edit_post( $input ): bool {
 		$post_id = absint( $input['post_id'] ?? 0 );

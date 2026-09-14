@@ -89,8 +89,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = 1.2.0 =
-* Added `post_type` support to all `closehub/*-post` MCP abilities (list-posts, get-post, create-post, update-post, trash-post) and to the `/closehub/v1/posts` REST endpoints. They still default to `post`, but can now read and write pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), and other post types registered with an admin UI, instead of only plain blog posts.
-* Fixed: publishing through `create-post`/`update-post` for a non-`post` type now checks that type's own `publish_*` capability (e.g. `publish_products`) instead of always checking `publish_posts`.
+* Added `post_type` support to all `closehub/*-post` MCP abilities (list-posts, get-post, create-post, update-post, trash-post) and to the `/closehub/v1/posts` REST endpoints. They still default to `post`, but can now read and write pages and WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions) instead of only plain blog posts. Allowed post types are limited to ones registered as public and admin-manageable, so internal WooCommerce records such as orders and coupons are not exposed as generic content.
+* Fixed: creating a post now checks that post type's own `create_posts` capability, and publishing through `create-post`/`update-post` checks its `publish_*` capability (e.g. `publish_products`), instead of always assuming `post`'s `edit_posts`/`publish_posts`.
+* Fixed: setting `categories` on a post type that doesn't support that taxonomy is now rejected before any other change is saved, instead of possibly after the title, content, or other fields were already updated.
 
 = 1.1.0 =
 * Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.

@@ -278,6 +278,11 @@ class CloseHub_REST_API {
 			return new WP_Error( 'closehub_post_type_not_allowed', sprintf( 'The "%s" post type is not available.', $post_type ), [ 'status' => 400 ] );
 		}
 
+		$categories_error = $this->categories_taxonomy_error( $post_type, $request );
+		if ( $categories_error ) {
+			return $categories_error;
+		}
+
 		$requested_status = $request->get_param( 'status' );
 
 		// Keep the post non-public while its metadata is being saved. This makes
@@ -327,6 +332,11 @@ class CloseHub_REST_API {
 			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
 		}
 
+		$categories_error = $this->categories_taxonomy_error( $post->post_type, $request );
+		if ( $categories_error ) {
+			return $categories_error;
+		}
+
 		$fields = [ 'ID' => $post_id ];
 		foreach ( [
 			'title'   => 'post_title',
@@ -356,14 +366,33 @@ class CloseHub_REST_API {
 
 	/**
 	 * Whether a post type is one CloseHub abilities and REST routes may read
-	 * or write. Registered and manageable through the admin UI (show_ui) is
-	 * enough — it covers 'post', 'page', and WooCommerce's 'product' (all
-	 * product types, including ones a narrower tool like WooCommerce's own
-	 * product-update ability doesn't support) without hardcoding a list.
+	 * or write. Requiring both 'public' and 'show_ui' covers 'post', 'page',
+	 * and WooCommerce's 'product' (all product types, including ones a
+	 * narrower tool like WooCommerce's own product-update ability doesn't
+	 * support) without hardcoding a list, while excluding internal record
+	 * types that are only admin-manageable, not public content — e.g.
+	 * WooCommerce's post-based 'shop_order'/'shop_coupon', which register
+	 * 'show_ui' but 'public' => false and must go through WooCommerce's own
+	 * order/coupon APIs instead of generic post fields.
 	 */
 	public static function post_type_allowed( string $post_type ): bool {
 		$post_type_object = get_post_type_object( $post_type );
-		return null !== $post_type_object && $post_type_object->show_ui;
+		return null !== $post_type_object && $post_type_object->show_ui && $post_type_object->public;
+	}
+
+	/**
+	 * Reject a nonempty 'categories' input up front when the post type doesn't
+	 * support the 'category' taxonomy, before create/update_post_data() does
+	 * any mutation — save_post_metadata() runs after wp_update_post() already
+	 * committed the post's core fields, which would otherwise leave a partial
+	 * update in place by the time this is caught.
+	 */
+	private function categories_taxonomy_error( string $post_type, WP_REST_Request $request ): ?WP_Error {
+		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
+		if ( $categories && ! is_object_in_taxonomy( $post_type, 'category' ) ) {
+			return new WP_Error( 'closehub_categories_not_supported', sprintf( 'The "%s" post type does not support categories.', $post_type ), [ 'status' => 400 ] );
+		}
+		return null;
 	}
 
 	/** Post id/link plus whichever SEO and featured-image data is stored for it. */
@@ -423,13 +452,11 @@ class CloseHub_REST_API {
 			return $result;
 		}
 
+		// categories_taxonomy_error() has already confirmed the post type
+		// supports the 'category' taxonomy before create/update_post_data()
+		// started mutating the post, so this only has to save what's given.
 		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
 		if ( $categories ) {
-			$post_type = get_post_type( $post_id );
-			if ( ! is_object_in_taxonomy( $post_type, 'category' ) ) {
-				return new WP_Error( 'closehub_categories_not_supported', sprintf( 'The "%s" post type does not support categories.', $post_type ), [ 'status' => 400 ] );
-			}
-
 			$category_ids = [];
 
 			foreach ( array_unique( $categories ) as $category_name ) {

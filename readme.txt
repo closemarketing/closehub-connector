@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,7 +16,7 @@ CloseHub Connector replaces the multiple credentials previously required to link
 
 Once the plugin is activated, it generates a secure API key and exposes a dedicated REST API namespace (`/wp-json/closehub/v1/`) that CloseHub uses to interact with your site.
 
-It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
+It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. These abilities default to the `post` type but accept a `post_type` input for any other post type registered with an admin UI — pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), or custom post types. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
 
 For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
 
@@ -34,8 +34,8 @@ For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrie
 **Available endpoints:**
 
 * `GET /closehub/v1/ping` — verify the connection
-* `POST /closehub/v1/posts` — publish or draft a post, including optional SEO metadata (Rank Math or Yoast), featured image, and categories
-* `PUT /closehub/v1/posts/{id}` — update a post's title, content, excerpt, status, SEO metadata, featured image, or categories
+* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, and categories
+* `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
@@ -87,6 +87,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.2.0 =
+* Added `post_type` support to all `closehub/*-post` MCP abilities (list-posts, get-post, create-post, update-post, trash-post) and to the `/closehub/v1/posts` REST endpoints. They still default to `post`, but can now read and write pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), and other post types registered with an admin UI, instead of only plain blog posts.
+* Fixed: publishing through `create-post`/`update-post` for a non-`post` type now checks that type's own `publish_*` capability (e.g. `publish_products`) instead of always checking `publish_posts`.
 
 = 1.1.0 =
 * Added an MCP server (OAuth 2.1 + PKCE) so AI clients such as Claude can list, read, create, update, and trash posts and read WooCommerce order summaries with the permissions of a real WordPress user.

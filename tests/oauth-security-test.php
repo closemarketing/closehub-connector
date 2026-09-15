@@ -30,6 +30,11 @@ function home_url( string $path = '' ): string { return 'https://example.test' .
 function rest_url( string $path = '' ): string { return 'https://example.test/wp-json/' . ltrim( $path, '/' ); }
 function wp_parse_url( string $url, ?int $component = null ) { return parse_url( $url, $component ?? -1 ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
 function rest_get_url_prefix(): string { return 'wp-json'; }
+function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
+function is_multisite(): bool { return false; }
+function is_main_site(): bool { return true; }
+function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
+function update_option( string $option, $value, bool $autoload = true ): bool { return true; }
 
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
@@ -96,5 +101,67 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 	);
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
+
+// ── static .well-known discovery metadata ───────────────────────────────────
+
+$document_root = sys_get_temp_dir() . '/closehub-oauth-test-docroot-' . uniqid();
+mkdir( $document_root, 0755, true );
+$_SERVER['DOCUMENT_ROOT'] = $document_root;
+
+CloseHub_OAuth::ensure_well_known_files();
+$resource_file = $document_root . '/.well-known/oauth-protected-resource';
+$server_file = $document_root . '/.well-known/oauth-authorization-server';
+$resource_metadata = json_decode( (string) file_get_contents( $resource_file ), true );
+$server_metadata = json_decode( (string) file_get_contents( $server_file ), true );
+closehub_test_assert( ! CloseHub_OAuth::well_known_files_need_regeneration(), 'Current static metadata must not require regeneration.' );
+closehub_test_assert( 'https://example.test/wp-json/mcp/mcp-adapter-default-server' === $resource_metadata['resource'], 'Static protected-resource metadata must identify the CloseHub MCP endpoint.' );
+closehub_test_assert( [ 'https://example.test' ] === $resource_metadata['authorization_servers'], 'Static protected-resource metadata must identify the CloseHub OAuth server.' );
+closehub_test_assert( 'https://example.test/wp-json/closehub-oauth/v1/register' === $server_metadata['registration_endpoint'], 'Static authorization-server metadata must expose CloseHub dynamic registration.' );
+
+file_put_contents( $resource_file, '{"stale":true}' );
+closehub_test_assert( CloseHub_OAuth::well_known_files_need_regeneration(), 'Stale static metadata must require regeneration.' );
+CloseHub_OAuth::ensure_well_known_files();
+closehub_test_assert( ! isset( json_decode( (string) file_get_contents( $resource_file ), true )['stale'] ), 'Static metadata must replace stale discovery data.' );
+
+unlink( $resource_file );
+unlink( $server_file );
+rmdir( $document_root . '/.well-known' );
+rmdir( $document_root );
+unset( $_SERVER['DOCUMENT_ROOT'] );
+
+// ── WordPress filesystem transport ─────────────────────────────────────────
+
+class CloseHub_Test_Filesystem {
+	public int $writes = 0;
+	public function is_dir( string $path ): bool { return is_dir( $path ); }
+	public function mkdir( string $path, int $chmod ): bool { return mkdir( $path, $chmod, true ); }
+	public function put_contents( string $path, string $contents, int $chmod ): bool {
+		$this->writes++;
+		return false !== file_put_contents( $path, $contents );
+	}
+}
+
+$document_root = sys_get_temp_dir() . '/closehub-oauth-test-filesystem-' . uniqid();
+mkdir( $document_root, 0755, true );
+$_SERVER['DOCUMENT_ROOT'] = $document_root;
+$wp_filesystem = new CloseHub_Test_Filesystem();
+closehub_test_assert( CloseHub_OAuth::ensure_well_known_files(), 'OAuth metadata must be writable through the WordPress filesystem transport.' );
+closehub_test_assert( 2 === $wp_filesystem->writes, 'The WordPress filesystem transport must write both OAuth metadata files.' );
+
+file_put_contents( $document_root . '/.well-known/.htaccess', "<IfModule mod_rewrite.c>\n\tRewriteEngine off\n</IfModule>\n" );
+closehub_test_assert( CloseHub_OAuth::enable_managed_discovery(), 'Managed OAuth discovery must install its Apache routing rule.' );
+$managed_htaccess = (string) file_get_contents( $document_root . '/.well-known/.htaccess' );
+closehub_test_assert( false !== strpos( $managed_htaccess, 'RewriteEngine off' ), 'Managed discovery must preserve the existing .htaccess contents.' );
+closehub_test_assert( false !== strpos( $managed_htaccess, '# BEGIN CloseHub OAuth Discovery' ), 'Managed discovery must mark its owned .htaccess rules.' );
+closehub_test_assert( false !== strpos( $managed_htaccess, 'RewriteRule ^oauth-(protected-resource|authorization-server)$ /index.php [L]' ), 'Managed discovery must route both OAuth metadata paths to WordPress.' );
+closehub_test_assert( CloseHub_OAuth::managed_discovery_is_enabled(), 'Managed discovery must report its installed Apache rules.' );
+
+unlink( $document_root . '/.well-known/oauth-protected-resource' );
+unlink( $document_root . '/.well-known/oauth-authorization-server' );
+unlink( $document_root . '/.well-known/.htaccess' );
+rmdir( $document_root . '/.well-known' );
+rmdir( $document_root );
+unset( $_SERVER['DOCUMENT_ROOT'] );
+unset( $wp_filesystem );
 
 echo "OAuth security checks passed.\n";

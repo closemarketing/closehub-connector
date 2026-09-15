@@ -93,7 +93,10 @@ class CloseHub_Content_Abilities {
 		$request = self::request( 'POST', '/closehub/v1/posts', $input );
 		$request->set_param( 'post_type', $post_type );
 		if ( ! $request->get_param( 'status' ) ) { $request->set_param( 'status', 'draft' ); }
-		return ( new CloseHub_REST_API() )->create_post_for_mcp( $request );
+		$permission_input = $input;
+		$permission_input['post_type'] = $post_type;
+		$permission_input['status']    = $request->get_param( 'status' );
+		return ( new CloseHub_REST_API() )->create_post_for_mcp( $request, fn() => self::can_create_post( $permission_input ) );
 	}
 
 	public static function update_post( $input ): array|WP_Error {
@@ -107,7 +110,7 @@ class CloseHub_Content_Abilities {
 		if ( $forbidden ) { return $forbidden; }
 		$request = self::request( 'PUT', '/closehub/v1/posts/' . $post_id, $input );
 		$request->set_param( 'id', $post_id );
-		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request );
+		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request, fn() => self::can_edit_post( $input ) );
 	}
 
 	public static function trash_post( $input ): array|WP_Error {

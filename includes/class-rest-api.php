@@ -153,7 +153,7 @@ class CloseHub_REST_API {
 	 * a list, e.g. Gravity Forms); otherwise it is merged into the entry. A
 	 * WP_Error is added under 'error' instead.
 	 */
-	private function run_across_network( callable $callback, ?string $key = null ): array {
+	private function run_across_network( callable $callback, ?string $key = null, ?callable $permission_callback = null ): array {
 		$results = [];
 
 		foreach ( get_sites( [ 'number' => 0 ] ) as $site ) {
@@ -165,7 +165,11 @@ class CloseHub_REST_API {
 				'url'     => get_site_url(),
 			];
 
-			$data = $callback();
+			if ( null !== $permission_callback && ! $permission_callback() ) {
+				$data = new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action on this site.', [ 'status' => 403 ] );
+			} else {
+				$data = $callback();
+			}
 			if ( is_wp_error( $data ) ) {
 				$entry['error'] = $data->get_error_message();
 			} elseif ( null !== $key ) {
@@ -198,9 +202,13 @@ class CloseHub_REST_API {
 	 * shape a caller outside the REST response cycle needs — e.g. an MCP
 	 * ability's execute_callback, which never sees a WP_REST_Response.
 	 */
-	public function run( callable $data_builder, ?string $network_key = null ): array|WP_Error {
+	public function run( callable $data_builder, ?string $network_key = null, ?callable $permission_callback = null ): array|WP_Error {
 		if ( is_multisite() ) {
-			return [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ];
+			return [ 'sites' => $this->run_across_network( $data_builder, $network_key, $permission_callback ) ];
+		}
+
+		if ( null !== $permission_callback && ! $permission_callback() ) {
+			return new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action.', [ 'status' => 403 ] );
 		}
 
 		return $data_builder();
@@ -234,13 +242,13 @@ class CloseHub_REST_API {
 	// directly, which stay private per this repo's REST API convention.
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function create_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
-		return $this->run( fn() => $this->create_post_data( $request ) );
+	public function create_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+		return $this->run( fn() => $this->create_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function update_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
-		return $this->run( fn() => $this->update_post_data( $request ) );
+	public function update_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+		return $this->run( fn() => $this->update_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */

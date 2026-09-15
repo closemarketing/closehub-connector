@@ -7,6 +7,9 @@ class CloseHub_OAuth {
 	private const NS = 'closehub-oauth/v1';
 	private const SCOPE = 'mcp:tools';
 	private const DB_VERSION = '3';
+	private const MANAGED_DISCOVERY_OPTION = 'closehub_oauth_managed_discovery';
+	private const HTACCESS_BEGIN = '# BEGIN CloseHub OAuth Discovery';
+	private const HTACCESS_END = '# END CloseHub OAuth Discovery';
 
 	public static function init(): void {
 		self::maybe_upgrade();
@@ -44,6 +47,118 @@ class CloseHub_OAuth {
 		dbDelta( 'CREATE TABLE ' . self::table( 'codes' ) . " (code_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, redirect_uri text NOT NULL, challenge varchar(128) NOT NULL, expires_at datetime NOT NULL, used tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY (code_hash), KEY expires_at (expires_at)) {$charset};" );
 		dbDelta( 'CREATE TABLE ' . self::table( 'tokens' ) . " (access_hash char(64) NOT NULL, refresh_hash char(64) NOT NULL, client_id varchar(191) NOT NULL, user_id bigint(20) unsigned NOT NULL, expires_at datetime NOT NULL, refresh_expires_at datetime NOT NULL, revoked tinyint(1) NOT NULL DEFAULT 0, created_at datetime NOT NULL, PRIMARY KEY (access_hash), UNIQUE KEY refresh_hash (refresh_hash), KEY user_id (user_id)) {$charset};" );
 		update_option( 'closehub_oauth_db_version', self::DB_VERSION, false );
+	}
+
+	/**
+	 * Write OAuth discovery metadata for servers that serve .well-known files
+	 * directly instead of passing those requests to WordPress.
+	 */
+	public static function ensure_well_known_files(): bool {
+		if ( is_multisite() && ! is_main_site() ) {
+			return true;
+		}
+
+		$directory = self::well_known_directory();
+		if ( ! self::ensure_well_known_directory( $directory ) ) {
+			return false;
+		}
+
+		$written = true;
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			$written = self::write_well_known_file( $directory . '/' . $filename, $metadata ) && $written;
+		}
+
+		return $written && ! self::well_known_files_need_regeneration();
+	}
+
+	/**
+	 * Initialize the WordPress filesystem transport. When direct writes are not
+	 * available, this renders WordPress's built-in credentials form in wp-admin.
+	 */
+	public static function initialize_filesystem( string $url, string $action = 'closehub_regenerate_oauth_metadata' ): bool {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$extra_fields = [ $action ];
+		$credentials = request_filesystem_credentials( $url, '', false, false, $extra_fields );
+		if ( false === $credentials ) {
+			return false;
+		}
+		if ( ! WP_Filesystem( $credentials ) ) {
+			request_filesystem_credentials( $url, '', true, false, $extra_fields );
+			return false;
+		}
+
+		return true;
+	}
+
+	/** Whether the static OAuth discovery metadata is missing or stale. */
+	public static function well_known_files_need_regeneration(): bool {
+		if ( is_multisite() && ! is_main_site() ) {
+			return false;
+		}
+
+		$directory = self::well_known_directory();
+		if ( ! is_dir( $directory ) || ! is_readable( $directory ) ) {
+			return true;
+		}
+
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			$path = $directory . '/' . $filename;
+			$json = self::well_known_json( $metadata );
+			if ( false === $json || ! is_file( $path ) || ! is_readable( $path ) || file_get_contents( $path ) !== $json ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** Return the static discovery documents keyed by their required filenames. */
+	public static function well_known_file_contents(): array {
+		$contents = [];
+		foreach ( self::well_known_metadata() as $filename => $metadata ) {
+			$json = self::well_known_json( $metadata );
+			if ( false !== $json ) {
+				$contents[ $filename ] = $json;
+			}
+		}
+
+		return $contents;
+	}
+
+	/** Enable Apache routing of OAuth discovery requests through WordPress. */
+	public static function enable_managed_discovery(): bool {
+		if ( is_multisite() && ! is_main_site() ) {
+			return false;
+		}
+
+		$directory = self::well_known_directory();
+		if ( ! self::ensure_well_known_directory( $directory ) ) {
+			return false;
+		}
+
+		$path = $directory . '/.htaccess';
+		$current = file_exists( $path ) ? (string) file_get_contents( $path ) : '';
+		if ( ! str_contains( $current, self::HTACCESS_BEGIN ) ) {
+			$rules = self::HTACCESS_BEGIN . "\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteRule ^oauth-(protected-resource|authorization-server)$ /index.php [L]\n</IfModule>\n" . self::HTACCESS_END . "\n";
+			if ( ! self::write_contents( $path, rtrim( $current ) . "\n\n" . $rules ) ) {
+				return false;
+			}
+		}
+
+		if ( ! self::managed_discovery_is_enabled() ) {
+			return false;
+		}
+		update_option( self::MANAGED_DISCOVERY_OPTION, true, false );
+		return true;
+	}
+
+	/** Whether the Apache routing rules installed by managed discovery exist. */
+	public static function managed_discovery_is_enabled(): bool {
+		if ( is_multisite() && ! is_main_site() ) {
+			return false;
+		}
+		$path = self::well_known_directory() . '/.htaccess';
+		return is_file( $path ) && is_readable( $path ) && str_contains( (string) file_get_contents( $path ), self::HTACCESS_BEGIN );
 	}
 
 	private static function maybe_upgrade(): void {
@@ -269,5 +384,39 @@ class CloseHub_OAuth {
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }
 	private static function hash( string $value ): string { return hash( 'sha256', $value ); }
+	private static function well_known_directory(): string {
+		$document_root = (string) ( $_SERVER['DOCUMENT_ROOT'] ?? '' );
+		$base = '' !== $document_root ? rtrim( $document_root, '/' ) . '/' : ABSPATH;
+		return $base . '.well-known';
+	}
+	private static function well_known_metadata(): array { return [ 'oauth-protected-resource' => self::resource_data(), 'oauth-authorization-server' => self::server_data() ]; }
+	private static function well_known_json( array $metadata ): string|false { return wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ); }
+	private static function ensure_well_known_directory( string $directory ): bool {
+		global $wp_filesystem;
+		if ( is_object( $wp_filesystem ) && method_exists( $wp_filesystem, 'is_dir' ) ) {
+			return $wp_filesystem->is_dir( $directory ) || $wp_filesystem->mkdir( $directory, 0755 );
+		}
+
+		return is_dir( $directory ) || wp_mkdir_p( $directory );
+	}
+	private static function write_well_known_file( string $path, array $metadata ): bool {
+		$json = self::well_known_json( $metadata );
+		if ( false === $json ) {
+			return false;
+		}
+		if ( file_exists( $path ) && file_get_contents( $path ) === $json ) {
+			return true;
+		}
+
+		return self::write_contents( $path, $json );
+	}
+	private static function write_contents( string $path, string $contents ): bool {
+		global $wp_filesystem;
+		if ( is_object( $wp_filesystem ) && method_exists( $wp_filesystem, 'put_contents' ) ) {
+			return $wp_filesystem->put_contents( $path, $contents, defined( 'FS_CHMOD_FILE' ) ? FS_CHMOD_FILE : 0644 );
+		}
+
+		return false !== file_put_contents( $path, $contents );
+	}
 	private static function error( string $code, string $message, int $status = 400 ): WP_Error { return new WP_Error( $code, $message, [ 'status' => $status ] ); }
 }

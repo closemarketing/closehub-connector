@@ -30,6 +30,9 @@ includes/
     class-api-key.php           Generate, store, verify, and regenerate the API key
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/
     class-admin.php             Settings → CloseHub admin page
+    class-oauth.php             MCP OAuth 2.1 + PKCE authorization server
+    class-content-abilities.php MCP abilities for posts/orders (list/get/create/update/trash, WooCommerce order summary)
+    class-site-abilities.php    MCP abilities for the go-live checklist (search-replace, robots.txt, noindex, permalinks, .htaccess, timezone/email, author reassign, plugin install/update, user creation)
 ```
 
 ## REST API

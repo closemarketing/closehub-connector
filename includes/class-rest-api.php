@@ -42,6 +42,12 @@ class CloseHub_REST_API {
 					'sanitize_callback' => 'sanitize_text_field',
 					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
 				],
+				'post_type' => [
+					'required'          => false,
+					'type'              => 'string',
+					'default'           => 'post',
+					'sanitize_callback' => 'sanitize_key',
+				],
 			],
 		] );
 
@@ -147,7 +153,7 @@ class CloseHub_REST_API {
 	 * a list, e.g. Gravity Forms); otherwise it is merged into the entry. A
 	 * WP_Error is added under 'error' instead.
 	 */
-	private function run_across_network( callable $callback, ?string $key = null ): array {
+	private function run_across_network( callable $callback, ?string $key = null, ?callable $permission_callback = null ): array {
 		$results = [];
 
 		foreach ( get_sites( [ 'number' => 0 ] ) as $site ) {
@@ -159,7 +165,11 @@ class CloseHub_REST_API {
 				'url'     => get_site_url(),
 			];
 
-			$data = $callback();
+			if ( null !== $permission_callback && ! $permission_callback() ) {
+				$data = new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action on this site.', [ 'status' => 403 ] );
+			} else {
+				$data = $callback();
+			}
 			if ( is_wp_error( $data ) ) {
 				$entry['error'] = $data->get_error_message();
 			} elseif ( null !== $key ) {
@@ -192,9 +202,13 @@ class CloseHub_REST_API {
 	 * shape a caller outside the REST response cycle needs — e.g. an MCP
 	 * ability's execute_callback, which never sees a WP_REST_Response.
 	 */
-	public function run( callable $data_builder, ?string $network_key = null ): array|WP_Error {
+	public function run( callable $data_builder, ?string $network_key = null, ?callable $permission_callback = null ): array|WP_Error {
 		if ( is_multisite() ) {
-			return [ 'sites' => $this->run_across_network( $data_builder, $network_key ) ];
+			return [ 'sites' => $this->run_across_network( $data_builder, $network_key, $permission_callback ) ];
+		}
+
+		if ( null !== $permission_callback && ! $permission_callback() ) {
+			return new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action.', [ 'status' => 403 ] );
 		}
 
 		return $data_builder();
@@ -228,13 +242,13 @@ class CloseHub_REST_API {
 	// directly, which stay private per this repo's REST API convention.
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function create_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
-		return $this->run( fn() => $this->create_post_data( $request ) );
+	public function create_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+		return $this->run( fn() => $this->create_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function update_post_for_mcp( WP_REST_Request $request ): array|WP_Error {
-		return $this->run( fn() => $this->update_post_data( $request ) );
+	public function update_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+		return $this->run( fn() => $this->update_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
@@ -267,6 +281,16 @@ class CloseHub_REST_API {
 	}
 
 	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
+		$post_type = (string) ( $request->get_param( 'post_type' ) ?: 'post' );
+		if ( ! self::post_type_allowed( $post_type ) ) {
+			return new WP_Error( 'closehub_post_type_not_allowed', sprintf( 'The "%s" post type is not available.', $post_type ), [ 'status' => 400 ] );
+		}
+
+		$categories_error = $this->categories_taxonomy_error( $post_type, $request );
+		if ( $categories_error ) {
+			return $categories_error;
+		}
+
 		$requested_status = $request->get_param( 'status' );
 
 		// Keep the post non-public while its metadata is being saved. This makes
@@ -276,7 +300,7 @@ class CloseHub_REST_API {
 			'post_content' => $request->get_param( 'content' ),
 			'post_excerpt' => $request->get_param( 'excerpt' ) ?? '',
 			'post_status'  => 'draft',
-			'post_type'    => 'post',
+			'post_type'    => $post_type,
 		], true );
 
 		if ( is_wp_error( $post_id ) ) {
@@ -312,8 +336,13 @@ class CloseHub_REST_API {
 		$post_id = (int) $request->get_param( 'id' );
 		$post    = get_post( $post_id );
 
-		if ( ! $post || 'post' !== $post->post_type ) {
+		if ( ! $post || ! self::post_type_allowed( $post->post_type ) ) {
 			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+
+		$categories_error = $this->categories_taxonomy_error( $post->post_type, $request );
+		if ( $categories_error ) {
+			return $categories_error;
 		}
 
 		$fields = [ 'ID' => $post_id ];
@@ -341,6 +370,44 @@ class CloseHub_REST_API {
 		}
 
 		return $this->post_response( $post_id );
+	}
+
+	/**
+	 * Whether a post type is one CloseHub abilities and REST routes may read
+	 * or write. Requiring both 'public' and 'show_ui' covers 'post', 'page',
+	 * and WooCommerce's 'product' (all product types, including ones a
+	 * narrower tool like WooCommerce's own product-update ability doesn't
+	 * support) without hardcoding a list, while excluding internal record
+	 * types that are only admin-manageable, not public content — e.g.
+	 * WooCommerce's post-based 'shop_order'/'shop_coupon', which register
+	 * 'show_ui' but 'public' => false and must go through WooCommerce's own
+	 * order/coupon APIs instead of generic post fields. 'attachment' is
+	 * excluded explicitly: it's both public and admin-manageable, but a
+	 * Media Library item isn't ordinary content — inserting/updating one
+	 * through these generic post fields, with no file involved, would leave
+	 * a broken attachment record instead of going through the Media API.
+	 */
+	public static function post_type_allowed( string $post_type ): bool {
+		if ( 'attachment' === $post_type ) {
+			return false;
+		}
+		$post_type_object = get_post_type_object( $post_type );
+		return null !== $post_type_object && $post_type_object->show_ui && $post_type_object->public;
+	}
+
+	/**
+	 * Reject a nonempty 'categories' input up front when the post type doesn't
+	 * support the 'category' taxonomy, before create/update_post_data() does
+	 * any mutation — save_post_metadata() runs after wp_update_post() already
+	 * committed the post's core fields, which would otherwise leave a partial
+	 * update in place by the time this is caught.
+	 */
+	private function categories_taxonomy_error( string $post_type, WP_REST_Request $request ): ?WP_Error {
+		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
+		if ( $categories && ! is_object_in_taxonomy( $post_type, 'category' ) ) {
+			return new WP_Error( 'closehub_categories_not_supported', sprintf( 'The "%s" post type does not support categories.', $post_type ), [ 'status' => 400 ] );
+		}
+		return null;
 	}
 
 	/** Post id/link plus whichever SEO and featured-image data is stored for it. */
@@ -400,6 +467,9 @@ class CloseHub_REST_API {
 			return $result;
 		}
 
+		// categories_taxonomy_error() has already confirmed the post type
+		// supports the 'category' taxonomy before create/update_post_data()
+		// started mutating the post, so this only has to save what's given.
 		$categories = array_filter( array_map( 'sanitize_text_field', (array) $request->get_param( 'categories' ) ) );
 		if ( $categories ) {
 			$category_ids = [];

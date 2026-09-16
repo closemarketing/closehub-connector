@@ -3,7 +3,7 @@ Contributors: closetechnology, davidperez
 Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
-Requires PHP: 8.1
+Requires PHP: 7.4
 Stable tag: 1.1.1
 Version: 1.1.1
 License: GPL-2.0-or-later

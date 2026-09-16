@@ -11,7 +11,7 @@ The user installs the plugin, goes to **Settings → CloseHub**, and copies two 
 
 ## Stack
 
-- **Language**: PHP 8.1+
+- **Language**: PHP 7.4+
 - **Minimum WordPress**: 6.4
 - **No build step** — plain PHP, no JavaScript compilation, no npm
 - **No manual autoloader for plugin classes** — `includes/*.php` files are loaded via `require_once` in `closehub-connector.php`, not PSR-4
@@ -93,7 +93,7 @@ On multisite, the per-site Settings page is not registered at all — instead a 
 
 ## Adding a new endpoint
 
-1. Put the business logic in a private `*_data()` method that returns `array|WP_Error`.
+1. Put the business logic in a private `*_data()` method that returns an array or `WP_Error`.
 2. Add a `register_rest_route()` call inside `CloseHub_REST_API::register_routes()` with `'permission_callback' => [ $this, 'check_api_key' ]`.
 3. Define `sanitize_callback` and `validate_callback` in the `args` array.
 4. Wire the public callback through `$this->respond( fn() => $this->*_data( $request ) )` so it automatically works both on a single site and across a network — pass a string as the second argument only if `*_data()` returns a plain list rather than an associative array (see `list_forms()`).

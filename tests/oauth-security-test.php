@@ -6,19 +6,26 @@ define( 'ABSPATH', __DIR__ . '/' );
 
 class WP_REST_Server { const READABLE = 'GET'; const CREATABLE = 'POST'; }
 class WP_REST_Response {
-	private array $headers = [];
-	public function __construct( private $data = null, private int $status = 200 ) {}
+	private $headers = [];
+	private $data;
+	private $status;
+	public function __construct( $data = null, int $status = 200 ) { $this->data = $data; $this->status = $status; }
 	public function header( string $name, string $value ): void { $this->headers[ $name ] = $value; }
 	public function get_headers(): array { return $this->headers; }
 	public function get_data() { return $this->data; }
 	public function get_status(): int { return $this->status; }
 }
 class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private array $data = [] ) {}
+	private $code;
+	private $message;
+	private $data;
+	public function __construct( string $code = '', string $message = '', array $data = [] ) { $this->code = $code; $this->message = $message; $this->data = $data; }
 }
 class WP_REST_Request {
-	private array $params = [];
-	public function __construct( private string $method = 'GET', private string $route = '' ) {}
+	private $params = [];
+	private $method;
+	private $route;
+	public function __construct( string $method = 'GET', string $route = '' ) { $this->method = $method; $this->route = $route; }
 	public function get_route(): string { return $this->route; }
 	public function set_param( string $key, $value ): void { $this->params[ $key ] = $value; }
 	public function get_param( string $key ) { return $this->params[ $key ] ?? null; }

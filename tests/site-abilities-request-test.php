@@ -5,7 +5,10 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ . '/' );
 
 class WP_Error {
-	public function __construct( public string $code = '', public string $message = '', public mixed $data = null ) {}
+	public $code;
+	public $message;
+	public $data;
+	public function __construct( string $code = '', string $message = '', $data = null ) { $this->code = $code; $this->message = $message; $this->data = $data; }
 }
 
 $GLOBALS['closehub_test_caps'] = [];

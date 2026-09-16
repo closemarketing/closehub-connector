@@ -5,7 +5,10 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ . '/' );
 
 class WP_Error {
-	public function __construct( private string $code, private string $message, private array $data = [] ) {}
+	private $code;
+	private $message;
+	private $data;
+	public function __construct( string $code, string $message, array $data = [] ) { $this->code = $code; $this->message = $message; $this->data = $data; }
 	public function get_error_message(): string { return $this->message; }
 }
 class WP_REST_Request {}
@@ -17,7 +20,7 @@ function get_sites( array $args ): array { return [ (object) [ 'blog_id' => 1 ],
 function switch_to_blog( int $blog_id ): void { $GLOBALS['closehub_test_blog_id'] = $blog_id; }
 function restore_current_blog(): void { $GLOBALS['closehub_test_blog_id'] = 1; }
 function get_site_url(): string { return 'https://site-' . $GLOBALS['closehub_test_blog_id'] . '.test'; }
-function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
+function is_wp_error( $value ): bool { return $value instanceof WP_Error; }
 
 require_once dirname( __DIR__ ) . '/includes/class-rest-api.php';
 

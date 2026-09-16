@@ -97,7 +97,7 @@ class CloseHub_Site_Abilities {
 	 * Table and column names below are fixed identifiers, never user input,
 	 * so they are safe to interpolate; only values go through $wpdb->prepare().
 	 */
-	public static function search_replace_domain( $input ): array|WP_Error {
+	public static function search_replace_domain( $input ) {
 		global $wpdb;
 
 		$from = trim( (string) ( $input['old_domain'] ?? '' ) );
@@ -154,7 +154,7 @@ class CloseHub_Site_Abilities {
 		return str_replace( $from, $to, $value );
 	}
 
-	private static function recursive_replace( mixed $data, string $from, string $to ): mixed {
+	private static function recursive_replace( $data, string $from, string $to ) {
 		if ( is_string( $data ) ) {
 			return str_replace( $from, $to, $data );
 		}
@@ -175,7 +175,7 @@ class CloseHub_Site_Abilities {
 
 	// ── robots.txt ──────────────────────────────────────────────────────────────
 
-	public static function set_robots_txt( $input ): array|WP_Error {
+	public static function set_robots_txt( $input ) {
 		$content = (string) ( $input['content'] ?? '' );
 		if ( '' === trim( $content ) ) {
 			return new WP_Error( 'closehub_robots_txt_empty', 'content is required.', [ 'status' => 400 ] );
@@ -202,7 +202,7 @@ class CloseHub_Site_Abilities {
 
 	// ── Per-page noindex ────────────────────────────────────────────────────────
 
-	public static function set_post_noindex( $input ): array|WP_Error {
+	public static function set_post_noindex( $input ) {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		$noindex = ! empty( $input['noindex'] );
 
@@ -230,7 +230,7 @@ class CloseHub_Site_Abilities {
 
 	// ── .htaccess ───────────────────────────────────────────────────────────────
 
-	public static function get_htaccess(): array|WP_Error {
+	public static function get_htaccess() {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 		$path = trailingslashit( get_home_path() ) . '.htaccess';
 
@@ -247,7 +247,7 @@ class CloseHub_Site_Abilities {
 
 	// ── Timezone / admin email ─────────────────────────────────────────────────
 
-	public static function set_site_settings( $input ): array|WP_Error {
+	public static function set_site_settings( $input ) {
 		$timezone    = trim( (string) ( $input['timezone'] ?? '' ) );
 		$admin_email = trim( (string) ( $input['admin_email'] ?? '' ) );
 		$result      = [];
@@ -278,7 +278,7 @@ class CloseHub_Site_Abilities {
 
 	// ── Bulk author reassign ───────────────────────────────────────────────────
 
-	public static function reassign_posts_author( $input ): array|WP_Error {
+	public static function reassign_posts_author( $input ) {
 		$from = absint( $input['from_author_id'] ?? 0 );
 		$to   = absint( $input['to_author_id'] ?? 0 );
 		if ( ! $from || ! $to ) {
@@ -311,7 +311,7 @@ class CloseHub_Site_Abilities {
 
 	// ── WordPress.org plugin install ───────────────────────────────────────────
 
-	public static function install_wp_org_plugin( $input ): array|WP_Error {
+	public static function install_wp_org_plugin( $input ) {
 		$slug = sanitize_key( (string) ( $input['slug'] ?? '' ) );
 		if ( '' === $slug ) {
 			return new WP_Error( 'closehub_plugin_slug_required', 'slug is required.', [ 'status' => 400 ] );
@@ -402,7 +402,7 @@ class CloseHub_Site_Abilities {
 
 	// ── Client user creation ────────────────────────────────────────────────────
 
-	public static function create_site_user( $input ): array|WP_Error {
+	public static function create_site_user( $input ) {
 		$email    = sanitize_email( (string) ( $input['email'] ?? '' ) );
 		$role     = sanitize_key( (string) ( $input['role'] ?? 'editor' ) );
 		$username = sanitize_user( (string) ( $input['username'] ?? '' ), true );

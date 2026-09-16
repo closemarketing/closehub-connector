@@ -66,7 +66,7 @@ class CloseHub_Content_Abilities {
 		return null !== $post_type_object && current_user_can( $post_type_object->cap->{$cap} ?? $cap );
 	}
 
-	public static function list_posts( $input ): array|WP_Error {
+	public static function list_posts( $input ) {
 		$input = is_array( $input ) ? $input : [];
 		$post_type = sanitize_key( $input['post_type'] ?? 'post' );
 		if ( ! CloseHub_REST_API::post_type_allowed( $post_type ) ) {
@@ -77,12 +77,12 @@ class CloseHub_Content_Abilities {
 		return [ 'posts' => array_map( [ self::class, 'post_data' ], $query->posts ), 'page' => $page, 'total' => (int) $query->found_posts, 'total_pages' => (int) $query->max_num_pages ];
 	}
 
-	public static function get_post( $input ): array|WP_Error {
+	public static function get_post( $input ) {
 		$post = get_post( absint( $input['post_id'] ?? 0 ) );
 		return $post && CloseHub_REST_API::post_type_allowed( $post->post_type ) && ! post_password_required( $post ) ? self::post_data( $post, true ) : new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
 	}
 
-	public static function create_post( $input ): array|WP_Error {
+	public static function create_post( $input ) {
 		$input = is_array( $input ) ? $input : [];
 		$post_type = sanitize_key( $input['post_type'] ?? 'post' );
 		if ( ! CloseHub_REST_API::post_type_allowed( $post_type ) ) {
@@ -99,7 +99,7 @@ class CloseHub_Content_Abilities {
 		return ( new CloseHub_REST_API() )->create_post_for_mcp( $request, fn() => self::can_create_post( $permission_input ) );
 	}
 
-	public static function update_post( $input ): array|WP_Error {
+	public static function update_post( $input ) {
 		$input = is_array( $input ) ? $input : [];
 		$post_id = absint( $input['post_id'] ?? 0 );
 		$post = get_post( $post_id );
@@ -113,7 +113,7 @@ class CloseHub_Content_Abilities {
 		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request, fn() => self::can_edit_post( $input ) );
 	}
 
-	public static function trash_post( $input ): array|WP_Error {
+	public static function trash_post( $input ) {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		$post = get_post( $post_id );
 		if ( ! $post || ! CloseHub_REST_API::post_type_allowed( $post->post_type ) ) { return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] ); }
@@ -122,7 +122,7 @@ class CloseHub_Content_Abilities {
 		return [ 'post_id' => $post_id, 'status' => 'trash' ];
 	}
 
-	public static function get_order_summary( $input ): array|WP_Error {
+	public static function get_order_summary( $input ) {
 		$request = self::request( 'GET', '/closehub/v1/woocommerce/orders', $input );
 		if ( ! $request->get_param( 'status' ) ) { $request->set_param( 'status', 'completed,processing' ); }
 		return ( new CloseHub_REST_API() )->get_woocommerce_orders_for_mcp( $request );

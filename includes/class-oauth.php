@@ -75,19 +75,19 @@ class CloseHub_OAuth {
 	public static function well_known(): void {
 		$uri = strtok( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), '?' );
 		$base = (string) ( wp_parse_url( home_url(), PHP_URL_PATH ) ?: '' );
-		if ( '' !== $base && str_starts_with( $uri, $base ) ) { $uri = substr( $uri, strlen( $base ) ); }
+		if ( '' !== $base && 0 === strpos( $uri, $base ) ) { $uri = substr( $uri, strlen( $base ) ); }
 		if ( '/.well-known/oauth-protected-resource' === $uri ) { wp_send_json( self::resource_data() ); }
 		if ( '/.well-known/oauth-authorization-server' === $uri ) { wp_send_json( self::server_data() ); }
 	}
 
-	public static function register_client( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public static function register_client( WP_REST_Request $request ) {
 		$throttled = self::throttle_registration();
 		if ( $throttled ) { return $throttled; }
 		$data = $request->get_json_params();
 		if ( ! is_array( $data ) ) { return self::error( 'invalid_client_metadata', 'Client metadata must be JSON.' ); }
 		$metadata_client_id = esc_url_raw( (string) ( $data['client_id'] ?? '' ) );
 		if ( '' !== $metadata_client_id ) {
-			if ( ! str_starts_with( $metadata_client_id, 'https://' ) ) { return self::error( 'invalid_client_metadata', 'client_id metadata must use HTTPS.' ); }
+			if ( 0 !== strpos( $metadata_client_id, 'https://' ) ) { return self::error( 'invalid_client_metadata', 'client_id metadata must use HTTPS.' ); }
 			$response = wp_safe_remote_get( $metadata_client_id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
 			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return self::error( 'invalid_client_metadata', 'Could not retrieve the Client ID metadata document.' ); }
 			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
@@ -128,7 +128,7 @@ class CloseHub_OAuth {
 		self::redirect( $params['redirect_uri'], [ 'code' => $code, 'state' => $params['state'] ] );
 	}
 
-	public static function token( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public static function token( WP_REST_Request $request ) {
 		return 'authorization_code' === $request->get_param( 'grant_type' ) ? self::exchange_code( $request ) : ( 'refresh_token' === $request->get_param( 'grant_type' ) ? self::exchange_refresh( $request ) : self::error( 'unsupported_grant_type', 'Unsupported grant type.' ) );
 	}
 
@@ -157,7 +157,7 @@ class CloseHub_OAuth {
 		return 'https' === $scheme || ( 'http' === $scheme && in_array( $host, [ 'localhost', '127.0.0.1', '[::1]' ], true ) );
 	}
 
-	private static function exchange_code( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	private static function exchange_code( WP_REST_Request $request ) {
 		$code = (string) $request->get_param( 'code' ); $client = (string) $request->get_param( 'client_id' ); $uri = esc_url_raw( (string) $request->get_param( 'redirect_uri' ) ); $verifier = (string) $request->get_param( 'code_verifier' );
 		global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'codes' ) . ' WHERE code_hash = %s AND used = 0 AND expires_at > %s', self::hash( $code ), gmdate( 'Y-m-d H:i:s' ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row || ! hash_equals( $row['client_id'], $client ) || ! hash_equals( $row['redirect_uri'], $uri ) || ! self::verify_pkce( $verifier, $row['challenge'] ) ) { return self::error( 'invalid_grant', 'The authorization grant is invalid, expired, or revoked.' ); }
@@ -165,14 +165,14 @@ class CloseHub_OAuth {
 		return self::issue_tokens( $client, (int) $row['user_id'] );
 	}
 
-	private static function exchange_refresh( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	private static function exchange_refresh( WP_REST_Request $request ) {
 		$refresh = (string) $request->get_param( 'refresh_token' ); $client = (string) $request->get_param( 'client_id' ); global $wpdb;
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'tokens' ) . ' WHERE refresh_hash = %s AND revoked = 0 AND refresh_expires_at > %s', self::hash( $refresh ), gmdate( 'Y-m-d H:i:s' ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row || ! hash_equals( $row['client_id'], $client ) || 1 !== $wpdb->update( self::table( 'tokens' ), [ 'revoked' => 1 ], [ 'refresh_hash' => self::hash( $refresh ), 'revoked' => 0 ], [ '%d' ], [ '%s', '%d' ] ) ) { return self::error( 'invalid_grant', 'The refresh token is invalid, expired, or revoked.' ); }
 		return self::issue_tokens( $client, (int) $row['user_id'] );
 	}
 
-	private static function issue_tokens( string $client, int $user_id ): WP_REST_Response|WP_Error {
+	private static function issue_tokens( string $client, int $user_id ) {
 		$access = bin2hex( random_bytes( 32 ) ); $refresh = bin2hex( random_bytes( 32 ) ); global $wpdb;
 		if ( false === $wpdb->insert( self::table( 'tokens' ), [ 'access_hash' => self::hash( $access ), 'refresh_hash' => self::hash( $refresh ), 'client_id' => $client, 'user_id' => $user_id, 'expires_at' => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), 'refresh_expires_at' => gmdate( 'Y-m-d H:i:s', time() + 30 * DAY_IN_SECONDS ), 'revoked' => 0, 'created_at' => current_time( 'mysql', true ) ], [ '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s' ] ) ) { return self::error( 'server_error', 'Could not issue tokens.', 500 ); }
 		$response = new WP_REST_Response( [ 'access_token' => $access, 'token_type' => 'Bearer', 'expires_in' => HOUR_IN_SECONDS, 'refresh_token' => $refresh, 'scope' => self::SCOPE ] );
@@ -193,7 +193,7 @@ class CloseHub_OAuth {
 	// in an already-escaping context (esc_attr(), add_query_arg()), never
 	// rendered as raw HTML, so leaving them unsanitized here is safe.
 	private static function params( WP_REST_Request $r ): array { return [ 'response_type' => sanitize_text_field( (string) $r->get_param( 'response_type' ) ), 'client_id' => (string) $r->get_param( 'client_id' ), 'redirect_uri' => esc_url_raw( (string) $r->get_param( 'redirect_uri' ) ), 'state' => (string) $r->get_param( 'state' ), 'challenge' => sanitize_text_field( (string) $r->get_param( 'code_challenge' ) ), 'method' => sanitize_text_field( (string) $r->get_param( 'code_challenge_method' ) ) ]; }
-	private static function valid_authorize( array $p ): array|WP_Error { $c = self::client( $p['client_id'] ); if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); } return $c; }
+	private static function valid_authorize( array $p ) { $c = self::client( $p['client_id'] ); if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); } return $c; }
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
 	private static function resource_data(): array { return [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ self::SCOPE ] ]; }
@@ -235,7 +235,7 @@ class CloseHub_OAuth {
 		// /wp-json prefix to account for.
 		$rest_route = (string) ( $_GET['rest_route'] ?? '' ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( '' !== $rest_route ) {
-			return $rest_route === $target || str_starts_with( $rest_route, $target . '/' );
+			return $rest_route === $target || 0 === strpos( $rest_route, $target . '/' );
 		}
 
 		// Pretty-permalinks: the path is {site subdirectory}/{REST prefix,
@@ -245,9 +245,9 @@ class CloseHub_OAuth {
 		// string satisfy the old substring check).
 		$uri  = strtok( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), '?' );
 		$base = (string) ( wp_parse_url( home_url(), PHP_URL_PATH ) ?: '' );
-		if ( '' !== $base && str_starts_with( $uri, $base ) ) { $uri = substr( $uri, strlen( $base ) ); }
+		if ( '' !== $base && 0 === strpos( $uri, $base ) ) { $uri = substr( $uri, strlen( $base ) ); }
 		$prefix = '/' . trim( (string) rest_get_url_prefix(), '/' ) . $target;
-		return $uri === $prefix || str_starts_with( $uri, $prefix . '/' );
+		return $uri === $prefix || 0 === strpos( $uri, $prefix . '/' );
 	}
 	/**
 	 * /register is public by spec (dynamic client registration), so anyone

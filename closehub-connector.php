@@ -5,7 +5,7 @@
  * Description:       Connect your WordPress site to CloseHub with a single API key and MCP content abilities.
  * Version:           1.1.1
  * Requires at least: 6.4
- * Requires PHP:      8.1
+ * Requires PHP:      7.4
  * Author:            Close Marketing
  * Author URI:        https://close.marketing
  * License:           GPL-2.0-or-later

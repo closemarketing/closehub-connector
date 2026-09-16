@@ -6,13 +6,19 @@ define( 'ABSPATH', __DIR__ . '/' );
 
 class WP_Error {}
 class WP_Post {
-	public function __construct( public string $post_type = 'post' ) {}
+	public $post_type;
+
+	public function __construct( string $post_type = 'post' ) {
+		$this->post_type = $post_type;
+	}
 }
 class WP_REST_Request {
-	public array $params = [];
-	public function __construct( public string $method, public string $route ) {}
-	public function set_param( string $key, mixed $value ): void { $this->params[ $key ] = $value; }
-	public function get_param( string $key ): mixed { return $this->params[ $key ] ?? null; }
+	public $params = [];
+	public $method;
+	public $route;
+	public function __construct( string $method, string $route ) { $this->method = $method; $this->route = $route; }
+	public function set_param( string $key, $value ): void { $this->params[ $key ] = $value; }
+	public function get_param( string $key ) { return $this->params[ $key ] ?? null; }
 }
 class CloseHub_REST_API {
 	public function create_post_for_mcp( WP_REST_Request $request ): array { return $request->params; }

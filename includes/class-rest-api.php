@@ -132,7 +132,7 @@ class CloseHub_REST_API {
 
 	// ── Permission callback ────────────────────────────────────────────────────
 
-	public function check_api_key( WP_REST_Request $request ): bool|WP_Error {
+	public function check_api_key( WP_REST_Request $request ) {
 		$key = $request->get_header( 'X-CloseHub-Key' );
 		if ( ! $key ) {
 			$key = $request->get_param( 'closehub_key' );
@@ -189,7 +189,7 @@ class CloseHub_REST_API {
 	 * Wrap a data builder so it runs once on the current site, or across
 	 * every site in the network (aggregated under 'sites') when multisite.
 	 */
-	private function respond( callable $data_builder, ?string $network_key = null ): WP_REST_Response|WP_Error {
+	private function respond( callable $data_builder, ?string $network_key = null ) {
 		$result = $this->run( $data_builder, $network_key );
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -202,7 +202,7 @@ class CloseHub_REST_API {
 	 * shape a caller outside the REST response cycle needs — e.g. an MCP
 	 * ability's execute_callback, which never sees a WP_REST_Response.
 	 */
-	public function run( callable $data_builder, ?string $network_key = null, ?callable $permission_callback = null ): array|WP_Error {
+	public function run( callable $data_builder, ?string $network_key = null, ?callable $permission_callback = null ) {
 		if ( is_multisite() ) {
 			return [ 'sites' => $this->run_across_network( $data_builder, $network_key, $permission_callback ) ];
 		}
@@ -216,19 +216,19 @@ class CloseHub_REST_API {
 
 	// ── Route callbacks ────────────────────────────────────────────────────────
 
-	public function ping(): WP_REST_Response|WP_Error {
+	public function ping() {
 		return $this->respond( fn() => $this->get_ping_data() );
 	}
 
-	public function create_post( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public function create_post( WP_REST_Request $request ) {
 		return $this->respond( fn() => $this->create_post_data( $request ) );
 	}
 
-	public function update_post( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public function update_post( WP_REST_Request $request ) {
 		return $this->respond( fn() => $this->update_post_data( $request ) );
 	}
 
-	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public function get_woocommerce_orders( WP_REST_Request $request ) {
 		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
 	}
 
@@ -242,29 +242,29 @@ class CloseHub_REST_API {
 	// directly, which stay private per this repo's REST API convention.
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function create_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+	public function create_post_for_mcp( WP_REST_Request $request, callable $permission_callback ) {
 		return $this->run( fn() => $this->create_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function update_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
+	public function update_post_for_mcp( WP_REST_Request $request, callable $permission_callback ) {
 		return $this->run( fn() => $this->update_post_data( $request ), null, $permission_callback );
 	}
 
 	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
-	public function get_woocommerce_orders_for_mcp( WP_REST_Request $request ): array|WP_Error {
+	public function get_woocommerce_orders_for_mcp( WP_REST_Request $request ) {
 		return $this->run( fn() => $this->get_woocommerce_orders_data( $request ) );
 	}
 
-	public function list_forms(): WP_REST_Response|WP_Error {
+	public function list_forms() {
 		return $this->respond( fn() => $this->list_forms_data(), 'forms' );
 	}
 
-	public function get_form( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public function get_form( WP_REST_Request $request ) {
 		return $this->respond( fn() => $this->get_form_data( $request ) );
 	}
 
-	public function get_form_entries( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+	public function get_form_entries( WP_REST_Request $request ) {
 		return $this->respond( fn() => $this->get_form_entries_data( $request ) );
 	}
 
@@ -280,7 +280,7 @@ class CloseHub_REST_API {
 		];
 	}
 
-	private function create_post_data( WP_REST_Request $request ): array|WP_Error {
+	private function create_post_data( WP_REST_Request $request ) {
 		$post_type = (string) ( $request->get_param( 'post_type' ) ?: 'post' );
 		if ( ! self::post_type_allowed( $post_type ) ) {
 			return new WP_Error( 'closehub_post_type_not_allowed', sprintf( 'The "%s" post type is not available.', $post_type ), [ 'status' => 400 ] );
@@ -332,7 +332,7 @@ class CloseHub_REST_API {
 	 * save_post_metadata() so both paths stay in sync with whichever SEO
 	 * plugin is active.
 	 */
-	private function update_post_data( WP_REST_Request $request ): array|WP_Error {
+	private function update_post_data( WP_REST_Request $request ) {
 		$post_id = (int) $request->get_param( 'id' );
 		$post    = get_post( $post_id );
 
@@ -461,7 +461,7 @@ class CloseHub_REST_API {
 	}
 
 	/** Save optional SEO, taxonomy, and featured-image data for a new post. */
-	private function save_post_metadata( int $post_id, WP_REST_Request $request ): bool|WP_Error {
+	private function save_post_metadata( int $post_id, WP_REST_Request $request ) {
 		$result = $this->save_seo_metadata( $post_id, $request );
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -529,7 +529,7 @@ class CloseHub_REST_API {
 	 * Download and attach a featured image, including sources whose URL has no
 	 * filename extension (for example, Google Drive's `uc` download endpoint).
 	 */
-	private function sideload_featured_image( string $image_url, int $post_id ): int|WP_Error {
+	private function sideload_featured_image( string $image_url, int $post_id ) {
 		$temporary_file = download_url( $image_url );
 		if ( is_wp_error( $temporary_file ) ) {
 			return $temporary_file;
@@ -553,7 +553,7 @@ class CloseHub_REST_API {
 	}
 
 	/** Write SEO fields for whichever supported SEO plugin is active. */
-	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): bool|WP_Error {
+	private function save_seo_metadata( int $post_id, WP_REST_Request $request ) {
 		$seo_title         = (string) ( $request->get_param( 'seo_title' ) ?? '' );
 		$seo_description   = (string) ( $request->get_param( 'seo_description' ) ?? '' );
 		$seo_focus_keyword = (string) ( $request->get_param( 'seo_focus_keyword' ) ?? '' );
@@ -592,7 +592,7 @@ class CloseHub_REST_API {
 	}
 
 	/** Update a post meta value, reporting a rejected write as a REST error. */
-	private function update_post_meta( int $post_id, string $key, string $value ): bool|WP_Error {
+	private function update_post_meta( int $post_id, string $key, string $value ) {
 		if ( false !== update_post_meta( $post_id, $key, $value ) || get_post_meta( $post_id, $key, true ) === $value ) {
 			return true;
 		}
@@ -600,7 +600,7 @@ class CloseHub_REST_API {
 		return new WP_Error( 'closehub_seo_metadata_failed', sprintf( 'Could not save %s metadata.', $key ) );
 	}
 
-	private function get_woocommerce_orders_data( WP_REST_Request $request ): array|WP_Error {
+	private function get_woocommerce_orders_data( WP_REST_Request $request ) {
 		if ( ! function_exists( 'wc_get_orders' ) ) {
 			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
 		}
@@ -641,7 +641,7 @@ class CloseHub_REST_API {
 		];
 	}
 
-	private function list_forms_data(): array|WP_Error {
+	private function list_forms_data() {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}
@@ -657,7 +657,7 @@ class CloseHub_REST_API {
 		return array_values( $data );
 	}
 
-	private function get_form_data( WP_REST_Request $request ): array|WP_Error {
+	private function get_form_data( WP_REST_Request $request ) {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}
@@ -681,7 +681,7 @@ class CloseHub_REST_API {
 		];
 	}
 
-	private function get_form_entries_data( WP_REST_Request $request ): array|WP_Error {
+	private function get_form_entries_data( WP_REST_Request $request ) {
 		if ( ! class_exists( 'GFAPI' ) ) {
 			return new WP_Error( 'closehub_gf_missing', 'Gravity Forms is not active.', [ 'status' => 503 ] );
 		}

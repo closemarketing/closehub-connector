@@ -15,10 +15,11 @@ class CloseHub_REST_API {
 }
 
 $GLOBALS['closehub_test_post'] = new WP_Post( 2788, '<!-- wp:paragraph --><p>Old text</p><!-- /wp:paragraph --><!-- wp:heading {"level":2} --><h2>Heading</h2><!-- /wp:heading -->' );
+$GLOBALS['closehub_test_last_capability'] = '';
 function get_post( int $id ): ?WP_Post { return $id === $GLOBALS['closehub_test_post']->ID ? $GLOBALS['closehub_test_post'] : null; }
 function get_post_field( string $field, int $id ): string { return $GLOBALS['closehub_test_post']->post_content; }
 function wp_update_post( array $postarr, bool $wp_error = false ): int { $GLOBALS['closehub_test_post']->post_content = $postarr['post_content']; return $postarr['ID']; }
-function current_user_can( string $capability, ...$args ): bool { return true; }
+function current_user_can( string $capability, ...$args ): bool { $GLOBALS['closehub_test_last_capability'] = $capability; return true; }
 function absint( $value ): int { return abs( (int) $value ); }
 function sanitize_text_field( string $value ): string { return trim( $value ); }
 function sanitize_key( string $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $value ) ); }
@@ -35,6 +36,11 @@ function serialize_blocks( array $blocks ): string {
 }
 
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
+
+// get-post exposes raw post_content, so its permission callback must use the
+// same object-level edit capability required by block replacement, not read_post.
+CloseHub_Content_Abilities::can_edit_post( [ 'post_id' => 2788 ] );
+if ( 'edit_post' !== $GLOBALS['closehub_test_last_capability'] ) { fwrite( STDERR, "get-post permission checks must use edit_post.\n" ); exit( 1 ); }
 
 $before = $GLOBALS['closehub_test_post']->post_content;
 $result = CloseHub_Content_Abilities::replace_gutenberg_block( [

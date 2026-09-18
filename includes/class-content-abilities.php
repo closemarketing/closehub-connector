@@ -28,7 +28,7 @@ class CloseHub_Content_Abilities {
 		self::ability( 'closehub/list-posts', 'List posts', 'List or search posts, or another post type such as "page" or "product", with status and pagination filters.', [ self::class, 'list_posts' ], [ self::class, 'can_edit_posts' ], true, true, [
 			'status' => [ 'type' => 'string' ], 'search' => [ 'type' => 'string' ], 'page' => [ 'type' => 'integer', 'default' => 1 ], 'per_page' => [ 'type' => 'integer', 'default' => 20 ], 'post_type' => [ 'type' => 'string', 'default' => 'post' ],
 		] );
-		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_read_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
+		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
 		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
 		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
 		self::ability( 'closehub/replace-gutenberg-block', 'Replace Gutenberg block', 'Replace one Gutenberg block at an exact block path after confirming the post content version and existing block type.', [ self::class, 'replace_gutenberg_block' ], [ self::class, 'can_edit_post' ], false, true, [
@@ -59,7 +59,6 @@ class CloseHub_Content_Abilities {
 
 	public static function can_edit_posts( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'edit_posts' ); }
 	public static function can_create_post( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'create_posts' ) && ( 'publish' !== ( $input['status'] ?? 'draft' ) || self::type_cap( $input['post_type'] ?? 'post', 'publish_posts' ) ); }
-	public static function can_read_post( $input ): bool { return current_user_can( 'read_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_edit_post( $input ): bool {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		return current_user_can( 'edit_post', $post_id ) && ( 'publish' !== ( $input['status'] ?? '' ) || self::type_cap( get_post_type( $post_id ) ?: 'post', 'publish_posts' ) );

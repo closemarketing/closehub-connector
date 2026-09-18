@@ -31,6 +31,10 @@ class CloseHub_Content_Abilities {
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
 		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
 		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
+		self::ability( 'closehub/update-post-slug', 'Update post slug', 'Update the URL slug of one post, page, product, or other supported content item. WordPress normalizes the slug and adds a suffix when needed to keep it unique.', [ self::class, 'update_post_slug' ], [ self::class, 'can_edit_post' ], false, true, [
+			'post_id' => [ 'type' => 'integer' ],
+			'slug'    => [ 'type' => 'string' ],
+		], [ 'post_id', 'slug' ], true );
 		self::ability( 'closehub/replace-gutenberg-block', 'Replace Gutenberg block', 'Replace one Gutenberg block at an exact block path after confirming the post content version and existing block type.', [ self::class, 'replace_gutenberg_block' ], [ self::class, 'can_edit_post' ], false, true, [
 			'post_id'             => [ 'type' => 'integer' ],
 			'block_path'          => [ 'type' => 'array', 'items' => [ 'type' => 'integer' ] ],
@@ -117,6 +121,28 @@ class CloseHub_Content_Abilities {
 		$request = self::request( 'PUT', '/closehub/v1/posts/' . $post_id, $input );
 		$request->set_param( 'id', $post_id );
 		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request, fn() => self::can_edit_post( $input ) );
+	}
+
+	/** Update only a post's permalink slug through WordPress's normal unique-slug handling. */
+	public static function update_post_slug( $input ): array|WP_Error {
+		$input   = is_array( $input ) ? $input : [];
+		$post_id = absint( $input['post_id'] ?? 0 );
+		$post    = get_post( $post_id );
+		if ( ! $post || ! CloseHub_REST_API::post_type_allowed( $post->post_type ) ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+
+		$slug = sanitize_title( (string) ( $input['slug'] ?? '' ) );
+		if ( '' === $slug ) {
+			return new WP_Error( 'closehub_invalid_post_slug', 'slug must normalize to a non-empty URL slug.', [ 'status' => 400 ] );
+		}
+
+		$updated = wp_update_post( [ 'ID' => $post_id, 'post_name' => $slug ], true );
+		if ( $updated instanceof WP_Error ) {
+			return $updated;
+		}
+		$post = get_post( $post_id );
+		return [ 'post_id' => $post_id, 'slug' => $post->post_name, 'url' => get_permalink( $post_id ) ];
 	}
 
 	/**

@@ -392,6 +392,8 @@ class CloseHub_Admin {
 				</td>
 			</tr>
 		</table>
+		<h3><?php esc_html_e( 'Registered Abilities', 'closehub-connector' ); ?></h3>
+		<?php $this->render_abilities_status(); ?>
 		<h3><?php esc_html_e( 'OAuth Discovery Metadata', 'closehub-connector' ); ?></h3>
 		<h4><?php esc_html_e( 'Managed OAuth Discovery (Apache)', 'closehub-connector' ); ?></h4>
 		<p><?php esc_html_e( 'Use this mode when Apache serves .well-known requests before WordPress. It adds a limited rule for the two OAuth metadata paths while preserving the existing .htaccess contents.', 'closehub-connector' ); ?></p>
@@ -411,5 +413,45 @@ class CloseHub_Admin {
 			<?php submit_button( __( 'Regenerate OAuth Metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
 		</form>
 		<?php
+	}
+
+	/**
+	 * Show how many CloseHub abilities are actually registered right now, so
+	 * a site owner can tell "MCP connects but has no tools" apart from
+	 * "MCP won't connect at all" without needing server log access.
+	 */
+	private function render_abilities_status(): void {
+		if ( ! function_exists( 'wp_get_abilities' ) ) {
+			echo '<p><span class="dashicons dashicons-warning" aria-hidden="true"></span> ';
+			esc_html_e( 'The WordPress Abilities API is not available on this site. Update WordPress core, or install the Abilities API feature plugin, then reactivate CloseHub Connector.', 'closehub-connector' );
+			echo '</p>';
+			return;
+		}
+
+		$abilities = wp_get_abilities();
+		$closehub  = array_filter( $abilities, static function ( $ability ) {
+			return str_starts_with( $ability->get_name(), 'closehub/' );
+		} );
+
+		if ( ! $closehub ) {
+			echo '<p><span class="dashicons dashicons-warning" aria-hidden="true"></span> ';
+			esc_html_e( 'No CloseHub abilities are registered. Deactivate and reactivate the plugin; if the problem persists, check the site error log for a fatal error during plugin load.', 'closehub-connector' );
+			echo '</p>';
+			return;
+		}
+
+		echo '<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> ';
+		printf(
+			/* translators: %d: number of registered abilities. */
+			esc_html( _n( '%d ability registered.', '%d abilities registered.', count( $closehub ), 'closehub-connector' ) ),
+			count( $closehub )
+		);
+		echo '</p>';
+
+		echo '<ul style="list-style:disc;margin-left:20px">';
+		foreach ( $closehub as $ability ) {
+			echo '<li><code>' . esc_html( $ability->get_name() ) . '</code> — ' . esc_html( $ability->get_label() ) . '</li>';
+		}
+		echo '</ul>';
 	}
 }

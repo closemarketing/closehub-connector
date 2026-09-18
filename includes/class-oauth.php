@@ -508,7 +508,8 @@ class CloseHub_OAuth {
 		foreach ( self::well_known_metadata() as $filename => $metadata ) {
 			$path = $directory . '/' . $filename;
 			$json = self::well_known_json( $metadata );
-			if ( false !== $json && self::read_contents( $path ) === $json ) {
+			$contents = self::read_contents( $path );
+			if ( false !== $contents && ( $contents === $json || self::is_closehub_metadata_file( $filename, $contents ) ) ) {
 				if ( is_object( $wp_filesystem ) && method_exists( $wp_filesystem, 'delete' ) ) { $wp_filesystem->delete( $path, false, 'f' ); } elseif ( self::path_exists( $path ) ) { unlink( $path ); }
 			}
 		}
@@ -522,6 +523,16 @@ class CloseHub_OAuth {
 	}
 	private static function remove_owned_block( string $contents, string $begin, string $end ): string {
 		return (string) preg_replace( '/' . preg_quote( $begin, '/' ) . '.*?' . preg_quote( $end, '/' ) . '\\R?/s', '', $contents );
+	}
+	private static function is_closehub_metadata_file( string $filename, string $contents ): bool {
+		$data = json_decode( $contents, true );
+		if ( ! is_array( $data ) ) {
+			return false;
+		}
+		if ( 'oauth-protected-resource' === $filename ) {
+			return str_ends_with( (string) ( $data['resource'] ?? '' ), '/wp-json/mcp/mcp-adapter-default-server' ) && isset( $data['authorization_servers'] );
+		}
+		return str_ends_with( (string) ( $data['authorization_endpoint'] ?? '' ), '/wp-json/closehub-oauth/v1/authorize' ) && str_ends_with( (string) ( $data['token_endpoint'] ?? '' ), '/wp-json/closehub-oauth/v1/token' );
 	}
 	private static function error( string $code, string $message, int $status = 400 ): WP_Error { return new WP_Error( $code, $message, [ 'status' => $status ] ); }
 }

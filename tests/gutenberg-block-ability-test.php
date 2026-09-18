@@ -16,15 +16,14 @@ class CloseHub_REST_API {
 class CloseHub_Test_WPDB {
 	public string $posts = 'posts';
 	public bool $force_conflict = false;
-	public function update( string $table, array $data, array $where ): int|false {
-		if ( $this->force_conflict ) {
+	public function query( string $query ): int|false {
+		if ( 'START TRANSACTION' === $query && $this->force_conflict ) {
 			$GLOBALS['closehub_test_post']->post_content = '<!-- wp:paragraph --><p>Concurrent edit</p><!-- /wp:paragraph -->';
-			return 0;
 		}
-		if ( $where['post_content'] !== $GLOBALS['closehub_test_post']->post_content ) { return 0; }
-		$GLOBALS['closehub_test_post']->post_content = $data['post_content'];
 		return 1;
 	}
+	public function prepare( string $query, int $id ): string { return $query; }
+	public function get_var( string $query ): string { return $GLOBALS['closehub_test_post']->post_content; }
 }
 
 $GLOBALS['closehub_test_post'] = new WP_Post( 2788, '<!-- wp:paragraph --><p>Old text</p><!-- /wp:paragraph --><!-- wp:heading {"level":2} --><h2>Heading</h2><!-- /wp:heading -->' );
@@ -32,8 +31,8 @@ $GLOBALS['closehub_test_last_capability'] = '';
 $GLOBALS['wpdb'] = new CloseHub_Test_WPDB();
 $GLOBALS['closehub_test_abilities'] = [];
 function get_post( int $id ): ?WP_Post { return $id === $GLOBALS['closehub_test_post']->ID ? $GLOBALS['closehub_test_post'] : null; }
-function current_time( string $type, bool $gmt = false ): string { return '2026-09-18 07:00:00'; }
-function clean_post_cache( int $id ): void {}
+function wp_update_post( array $postarr, bool $wp_error = false ): int { $GLOBALS['closehub_test_post']->post_content = $postarr['post_content']; return $postarr['ID']; }
+function wp_slash( string $value ): string { return $value; }
 function wp_register_ability_category( string $id, array $args ): bool { return true; }
 function wp_register_ability( string $id, array $args ): bool { $GLOBALS['closehub_test_abilities'][ $id ] = $args; return true; }
 function current_user_can( string $capability, ...$args ): bool { $GLOBALS['closehub_test_last_capability'] = $capability; return true; }

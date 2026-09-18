@@ -165,45 +165,50 @@ class CloseHub_Content_Abilities {
 		if ( $blocks instanceof WP_Error ) {
 			return $blocks;
 		}
-		$updated = self::replace_post_content_if_current( $post, serialize_blocks( $blocks ) );
+		$updated = self::replace_post_content_if_current( $post, $expected_hash, serialize_blocks( $blocks ) );
 		if ( $updated instanceof WP_Error ) {
 			return $updated;
 		}
 
-		$post = get_post( $post_id );
-		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => hash( 'sha256', $post->post_content ) ];
+		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => $updated ];
 	}
 
 	private static function canonical_block_name( string $block_name ): string {
 		return '' === $block_name || str_contains( $block_name, '/' ) ? $block_name : 'core/' . $block_name;
 	}
 	/**
-	 * Atomically replace content only when the raw database value is still the
-	 * one returned by get-post. A PHP-level lock cannot coordinate Gutenberg,
-	 * REST, or third-party writers that do not opt into it; this compare-and-swap
-	 * does, and it cannot leave an abandoned lock behind.
+	 * Lock the row before checking its raw bytes, then use WordPress's normal
+	 * update lifecycle while the transaction prevents any other content writer
+	 * from changing it. A PHP-level lock cannot coordinate Gutenberg, REST, or
+	 * third-party writers that do not opt into it.
 	 */
-	private static function replace_post_content_if_current( WP_Post $post, string $content ): true|WP_Error {
+	private static function replace_post_content_if_current( WP_Post $post, string $expected_hash, string $content ): string|WP_Error {
 		global $wpdb;
-		$updated = $wpdb->update(
-			$wpdb->posts,
-			[
-				'post_content'      => $content,
-				'post_modified'     => current_time( 'mysql' ),
-				'post_modified_gmt' => current_time( 'mysql', true ),
-			],
-			[ 'ID' => $post->ID, 'post_content' => $post->post_content ],
-			[ '%s', '%s', '%s' ],
-			[ '%d', '%s' ]
-		);
-		if ( false === $updated ) {
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
 			return new WP_Error( 'closehub_post_update_failed', 'Post could not be updated.', [ 'status' => 500 ] );
 		}
-		if ( 0 === $updated ) {
-			return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
+		try {
+			$current_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d FOR UPDATE", $post->ID ) );
+			if ( ! is_string( $current_content ) || ! hash_equals( hash( 'sha256', $current_content ), $expected_hash ) ) {
+				$wpdb->query( 'ROLLBACK' );
+				return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
+			}
+
+			$updated = wp_update_post( [ 'ID' => $post->ID, 'post_content' => wp_slash( $content ) ], true );
+			if ( $updated instanceof WP_Error ) {
+				$wpdb->query( 'ROLLBACK' );
+				return $updated;
+			}
+			$saved = get_post( $post->ID );
+			if ( ! $saved || false === $wpdb->query( 'COMMIT' ) ) {
+				$wpdb->query( 'ROLLBACK' );
+				return new WP_Error( 'closehub_post_update_failed', 'Post could not be updated.', [ 'status' => 500 ] );
+			}
+			return hash( 'sha256', $saved->post_content );
+		} catch ( Throwable $error ) {
+			$wpdb->query( 'ROLLBACK' );
+			throw $error;
 		}
-		clean_post_cache( $post->ID );
-		return true;
 	}
 
 	/** @return array<array<string,mixed>|WP_Error>|WP_Error */

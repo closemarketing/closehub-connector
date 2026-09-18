@@ -1,7 +1,6 @@
 # General
 .DS_Store
 composer.lock
-composer.json
 
 # Version Control
 .github

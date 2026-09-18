@@ -134,7 +134,7 @@ class CloseHub_Content_Abilities {
 		}
 
 		$expected_hash = (string) ( $input['expected_content_hash'] ?? '' );
-		if ( ! preg_match( '/^[a-f0-9]{64}$/', $expected_hash ) || ! hash_equals( hash( 'sha256', $post->post_content ), $expected_hash ) ) {
+		if ( ! preg_match( '/^[a-f0-9]{64}$/', $expected_hash ) ) {
 			return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
 		}
 
@@ -153,21 +153,44 @@ class CloseHub_Content_Abilities {
 		if ( 1 !== count( $replacement ) || empty( $replacement[0]['blockName'] ) ) {
 			return new WP_Error( 'closehub_invalid_gutenberg_block', 'block must contain exactly one valid Gutenberg block.', [ 'status' => 400 ] );
 		}
-		$expected_name = sanitize_text_field( (string) ( $input['expected_block_name'] ?? '' ) );
+		$expected_name = self::canonical_block_name( sanitize_text_field( (string) ( $input['expected_block_name'] ?? '' ) ) );
 		if ( '' === $expected_name || $expected_name !== $replacement[0]['blockName'] ) {
 			return new WP_Error( 'closehub_block_type_mismatch', 'The replacement block must have the expected Gutenberg block type.', [ 'status' => 400 ] );
 		}
 
-		$blocks = self::replace_block_at_path( parse_blocks( $post->post_content ), $path, $replacement[0], $expected_name );
-		if ( $blocks instanceof WP_Error ) {
-			return $blocks;
+		if ( ! self::acquire_post_lock( $post_id ) ) {
+			return new WP_Error( 'closehub_post_locked', 'Post is being updated. Get the post again and retry.', [ 'status' => 409 ] );
 		}
-		$updated = wp_update_post( [ 'ID' => $post_id, 'post_content' => serialize_blocks( $blocks ) ], true );
-		if ( $updated instanceof WP_Error ) {
-			return $updated;
+		try {
+			// Re-read inside the per-post lock so the hash check and the write use
+			// the same snapshot instead of allowing two stale requests to race.
+			$post = get_post( $post_id );
+			if ( ! $post || ! hash_equals( hash( 'sha256', $post->post_content ), $expected_hash ) ) {
+				return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
+			}
+			$blocks = self::replace_block_at_path( parse_blocks( $post->post_content ), $path, $replacement[0], $expected_name );
+			if ( $blocks instanceof WP_Error ) {
+				return $blocks;
+			}
+			$updated = wp_update_post( [ 'ID' => $post_id, 'post_content' => wp_slash( serialize_blocks( $blocks ) ) ], true );
+			if ( $updated instanceof WP_Error ) {
+				return $updated;
+			}
+		} finally {
+			self::release_post_lock( $post_id );
 		}
 
 		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => hash( 'sha256', get_post_field( 'post_content', $post_id ) ) ];
+	}
+
+	private static function canonical_block_name( string $block_name ): string {
+		return '' === $block_name || str_contains( $block_name, '/' ) ? $block_name : 'core/' . $block_name;
+	}
+	private static function acquire_post_lock( int $post_id ): bool {
+		return add_option( 'closehub_gutenberg_lock_' . $post_id, time(), '', 'no' );
+	}
+	private static function release_post_lock( int $post_id ): void {
+		delete_option( 'closehub_gutenberg_lock_' . $post_id );
 	}
 
 	/** @return array<array<string,mixed>|WP_Error>|WP_Error */

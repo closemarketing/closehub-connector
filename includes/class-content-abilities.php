@@ -31,6 +31,13 @@ class CloseHub_Content_Abilities {
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_read_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
 		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
 		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
+		self::ability( 'closehub/replace-gutenberg-block', 'Replace Gutenberg block', 'Replace one Gutenberg block at an exact block path after confirming the post content version and existing block type.', [ self::class, 'replace_gutenberg_block' ], [ self::class, 'can_edit_post' ], false, true, [
+			'post_id'             => [ 'type' => 'integer' ],
+			'block_path'          => [ 'type' => 'array', 'items' => [ 'type' => 'integer' ] ],
+			'expected_block_name' => [ 'type' => 'string' ],
+			'expected_content_hash' => [ 'type' => 'string' ],
+			'block'               => [ 'type' => 'string' ],
+		], [ 'post_id', 'block_path', 'expected_block_name', 'expected_content_hash', 'block' ] );
 		self::ability( 'closehub/trash-post', 'Trash post', 'Send an existing post, page, product, or other supported content item to the WordPress trash without permanently deleting it.', [ self::class, 'trash_post' ], [ self::class, 'can_delete_post' ], false, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ], true );
 		self::ability( 'closehub/get-order-summary', 'Get WooCommerce order summary', 'Get order count, total sales, average order value, and orders for a date range.', [ self::class, 'get_order_summary' ], [ self::class, 'can_manage_woocommerce' ], true, true, [ 'after' => [ 'type' => 'string' ], 'before' => [ 'type' => 'string' ], 'status' => [ 'type' => 'string', 'default' => 'completed,processing' ] ], [ 'after', 'before' ], false, 'closehub-commerce' );
 	}
@@ -113,6 +120,79 @@ class CloseHub_Content_Abilities {
 		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request, fn() => self::can_edit_post( $input ) );
 	}
 
+	/**
+	 * Replace a single parsed block, rather than asking a client to rewrite an
+	 * entire post_content string. block_path is a zero-based path through each
+	 * block's innerBlocks array, e.g. [ 2, 0 ] selects the first child of the
+	 * third top-level block.
+	 */
+	public static function replace_gutenberg_block( $input ): array|WP_Error {
+		$input   = is_array( $input ) ? $input : [];
+		$post_id = absint( $input['post_id'] ?? 0 );
+		$post    = get_post( $post_id );
+		if ( ! $post || ! CloseHub_REST_API::post_type_allowed( $post->post_type ) ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+
+		$expected_hash = (string) ( $input['expected_content_hash'] ?? '' );
+		if ( ! preg_match( '/^[a-f0-9]{64}$/', $expected_hash ) || ! hash_equals( hash( 'sha256', $post->post_content ), $expected_hash ) ) {
+			return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
+		}
+
+		$path = $input['block_path'] ?? [];
+		if ( ! is_array( $path ) || [] === $path ) {
+			return new WP_Error( 'closehub_invalid_block_path', 'block_path must identify one block.', [ 'status' => 400 ] );
+		}
+		foreach ( $path as $index ) {
+			if ( ! is_int( $index ) && ! ctype_digit( (string) $index ) || (int) $index < 0 ) {
+				return new WP_Error( 'closehub_invalid_block_path', 'block_path must contain non-negative indexes.', [ 'status' => 400 ] );
+			}
+		}
+		$path = array_map( 'intval', array_values( $path ) );
+
+		$replacement = parse_blocks( (string) ( $input['block'] ?? '' ) );
+		if ( 1 !== count( $replacement ) || empty( $replacement[0]['blockName'] ) ) {
+			return new WP_Error( 'closehub_invalid_gutenberg_block', 'block must contain exactly one valid Gutenberg block.', [ 'status' => 400 ] );
+		}
+		$expected_name = sanitize_text_field( (string) ( $input['expected_block_name'] ?? '' ) );
+		if ( '' === $expected_name || $expected_name !== $replacement[0]['blockName'] ) {
+			return new WP_Error( 'closehub_block_type_mismatch', 'The replacement block must have the expected Gutenberg block type.', [ 'status' => 400 ] );
+		}
+
+		$blocks = self::replace_block_at_path( parse_blocks( $post->post_content ), $path, $replacement[0], $expected_name );
+		if ( $blocks instanceof WP_Error ) {
+			return $blocks;
+		}
+		$updated = wp_update_post( [ 'ID' => $post_id, 'post_content' => serialize_blocks( $blocks ) ], true );
+		if ( $updated instanceof WP_Error ) {
+			return $updated;
+		}
+
+		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => hash( 'sha256', get_post_field( 'post_content', $post_id ) ) ];
+	}
+
+	/** @return array<array<string,mixed>|WP_Error>|WP_Error */
+	private static function replace_block_at_path( array $blocks, array $path, array $replacement, string $expected_name ): array|WP_Error {
+		$index = array_shift( $path );
+		if ( ! isset( $blocks[ $index ] ) ) {
+			return new WP_Error( 'closehub_block_not_found', 'No Gutenberg block exists at block_path.', [ 'status' => 404 ] );
+		}
+		if ( [] === $path ) {
+			if ( $expected_name !== ( $blocks[ $index ]['blockName'] ?? '' ) ) {
+				return new WP_Error( 'closehub_block_type_mismatch', 'The block at block_path is not the expected Gutenberg block type.', [ 'status' => 409 ] );
+			}
+			$blocks[ $index ] = $replacement;
+			return $blocks;
+		}
+
+		$children = self::replace_block_at_path( $blocks[ $index ]['innerBlocks'] ?? [], $path, $replacement, $expected_name );
+		if ( $children instanceof WP_Error ) {
+			return $children;
+		}
+		$blocks[ $index ]['innerBlocks'] = $children;
+		return $blocks;
+	}
+
 	public static function trash_post( $input ): array|WP_Error {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		$post = get_post( $post_id );
@@ -164,7 +244,7 @@ class CloseHub_Content_Abilities {
 		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ];
 		if ( $full ) {
 			$categories = is_object_in_taxonomy( $post->post_type, 'category' ) ? wp_get_post_categories( $post->ID, [ 'fields' => 'names' ] ) : [];
-			$data += [ 'content' => $post->post_content, 'excerpt' => $post->post_excerpt, 'categories' => $categories ] + CloseHub_REST_API::cms_metadata( $post->ID );
+			$data += [ 'content' => $post->post_content, 'content_hash' => hash( 'sha256', $post->post_content ), 'excerpt' => $post->post_excerpt, 'categories' => $categories ] + CloseHub_REST_API::cms_metadata( $post->ID );
 		}
 		return $data;
 	}

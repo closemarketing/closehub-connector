@@ -13,17 +13,29 @@ class WP_Post {
 class CloseHub_REST_API {
 	public static function post_type_allowed( string $post_type ): bool { return in_array( $post_type, [ 'post', 'page' ], true ); }
 }
+class CloseHub_Test_WPDB {
+	public string $posts = 'posts';
+	public bool $force_conflict = false;
+	public function update( string $table, array $data, array $where ): int|false {
+		if ( $this->force_conflict ) {
+			$GLOBALS['closehub_test_post']->post_content = '<!-- wp:paragraph --><p>Concurrent edit</p><!-- /wp:paragraph -->';
+			return 0;
+		}
+		if ( $where['post_content'] !== $GLOBALS['closehub_test_post']->post_content ) { return 0; }
+		$GLOBALS['closehub_test_post']->post_content = $data['post_content'];
+		return 1;
+	}
+}
 
 $GLOBALS['closehub_test_post'] = new WP_Post( 2788, '<!-- wp:paragraph --><p>Old text</p><!-- /wp:paragraph --><!-- wp:heading {"level":2} --><h2>Heading</h2><!-- /wp:heading -->' );
 $GLOBALS['closehub_test_last_capability'] = '';
-$GLOBALS['closehub_test_options'] = [];
-$GLOBALS['closehub_test_was_slashed'] = false;
+$GLOBALS['wpdb'] = new CloseHub_Test_WPDB();
+$GLOBALS['closehub_test_abilities'] = [];
 function get_post( int $id ): ?WP_Post { return $id === $GLOBALS['closehub_test_post']->ID ? $GLOBALS['closehub_test_post'] : null; }
-function get_post_field( string $field, int $id ): string { return $GLOBALS['closehub_test_post']->post_content; }
-function wp_update_post( array $postarr, bool $wp_error = false ): int { $GLOBALS['closehub_test_post']->post_content = $postarr['post_content']; return $postarr['ID']; }
-function wp_slash( string $value ): string { $GLOBALS['closehub_test_was_slashed'] = true; return $value; }
-function add_option( string $option, $value, string $deprecated = '', string $autoload = 'yes' ): bool { if ( isset( $GLOBALS['closehub_test_options'][ $option ] ) ) { return false; } $GLOBALS['closehub_test_options'][ $option ] = $value; return true; }
-function delete_option( string $option ): bool { unset( $GLOBALS['closehub_test_options'][ $option ] ); return true; }
+function current_time( string $type, bool $gmt = false ): string { return '2026-09-18 07:00:00'; }
+function clean_post_cache( int $id ): void {}
+function wp_register_ability_category( string $id, array $args ): bool { return true; }
+function wp_register_ability( string $id, array $args ): bool { $GLOBALS['closehub_test_abilities'][ $id ] = $args; return true; }
 function current_user_can( string $capability, ...$args ): bool { $GLOBALS['closehub_test_last_capability'] = $capability; return true; }
 function absint( $value ): int { return abs( (int) $value ); }
 function sanitize_text_field( string $value ): string { return trim( $value ); }
@@ -54,9 +66,9 @@ $result = CloseHub_Content_Abilities::replace_gutenberg_block( [
 	'block_path' => [ 0 ],
 	'expected_block_name' => 'paragraph',
 	'expected_content_hash' => hash( 'sha256', $before ),
-	'block' => '<!-- wp:paragraph --><p>New text</p><!-- /wp:paragraph -->',
+	'block' => "\n  <!-- wp:paragraph --><p>New text</p><!-- /wp:paragraph -->\n",
 ] );
-if ( $result instanceof WP_Error || ! $GLOBALS['closehub_test_was_slashed'] || ! str_contains( $GLOBALS['closehub_test_post']->post_content, '<p>New text</p>' ) || ! str_contains( $GLOBALS['closehub_test_post']->post_content, '<h2>Heading</h2>' ) ) { fwrite( STDERR, "Replacing one block should preserve its siblings and slash saved content.\n" ); exit( 1 ); }
+if ( $result instanceof WP_Error || ! str_contains( $GLOBALS['closehub_test_post']->post_content, '<p>New text</p>' ) || ! str_contains( $GLOBALS['closehub_test_post']->post_content, '<h2>Heading</h2>' ) ) { fwrite( STDERR, "Replacing one block should preserve siblings and allow whitespace around the replacement.\n" ); exit( 1 ); }
 
 $stale = CloseHub_Content_Abilities::replace_gutenberg_block( [
 	'post_id' => 2788, 'block_path' => [ 0 ], 'expected_block_name' => 'paragraph', 'expected_content_hash' => hash( 'sha256', $before ), 'block' => '<!-- wp:paragraph --><p>Stale</p><!-- /wp:paragraph -->',
@@ -68,10 +80,13 @@ $wrong_type = CloseHub_Content_Abilities::replace_gutenberg_block( [
 ] );
 if ( ! $wrong_type instanceof WP_Error || 'closehub_block_type_mismatch' !== $wrong_type->code ) { fwrite( STDERR, "A mismatched target type should be rejected.\n" ); exit( 1 ); }
 
-$GLOBALS['closehub_test_options']['closehub_gutenberg_lock_2788'] = time();
-$locked = CloseHub_Content_Abilities::replace_gutenberg_block( [
+$GLOBALS['wpdb']->force_conflict = true;
+$concurrent = CloseHub_Content_Abilities::replace_gutenberg_block( [
 	'post_id' => 2788, 'block_path' => [ 0 ], 'expected_block_name' => 'core/paragraph', 'expected_content_hash' => hash( 'sha256', $GLOBALS['closehub_test_post']->post_content ), 'block' => '<!-- wp:paragraph --><p>Locked</p><!-- /wp:paragraph -->',
 ] );
-if ( ! $locked instanceof WP_Error || 'closehub_post_locked' !== $locked->code ) { fwrite( STDERR, "A concurrent replacement must be rejected by the post lock.\n" ); exit( 1 ); }
+if ( ! $concurrent instanceof WP_Error || 'closehub_content_changed' !== $concurrent->code ) { fwrite( STDERR, "A concurrent write must be rejected atomically.\n" ); exit( 1 ); }
+
+CloseHub_Content_Abilities::register_abilities();
+if ( empty( $GLOBALS['closehub_test_abilities']['closehub/replace-gutenberg-block']['meta']['annotations']['destructive'] ) ) { fwrite( STDERR, "Block replacement must be marked destructive.\n" ); exit( 1 ); }
 
 echo "Gutenberg block ability checks passed.\n";

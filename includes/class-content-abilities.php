@@ -37,7 +37,7 @@ class CloseHub_Content_Abilities {
 			'expected_block_name' => [ 'type' => 'string' ],
 			'expected_content_hash' => [ 'type' => 'string' ],
 			'block'               => [ 'type' => 'string' ],
-		], [ 'post_id', 'block_path', 'expected_block_name', 'expected_content_hash', 'block' ] );
+			], [ 'post_id', 'block_path', 'expected_block_name', 'expected_content_hash', 'block' ], true );
 		self::ability( 'closehub/trash-post', 'Trash post', 'Send an existing post, page, product, or other supported content item to the WordPress trash without permanently deleting it.', [ self::class, 'trash_post' ], [ self::class, 'can_delete_post' ], false, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ], true );
 		self::ability( 'closehub/get-order-summary', 'Get WooCommerce order summary', 'Get order count, total sales, average order value, and orders for a date range.', [ self::class, 'get_order_summary' ], [ self::class, 'can_manage_woocommerce' ], true, true, [ 'after' => [ 'type' => 'string' ], 'before' => [ 'type' => 'string' ], 'status' => [ 'type' => 'string', 'default' => 'completed,processing' ] ], [ 'after', 'before' ], false, 'closehub-commerce' );
 	}
@@ -149,7 +149,7 @@ class CloseHub_Content_Abilities {
 		}
 		$path = array_map( 'intval', array_values( $path ) );
 
-		$replacement = parse_blocks( (string) ( $input['block'] ?? '' ) );
+		$replacement = parse_blocks( trim( (string) ( $input['block'] ?? '' ) ) );
 		if ( 1 !== count( $replacement ) || empty( $replacement[0]['blockName'] ) ) {
 			return new WP_Error( 'closehub_invalid_gutenberg_block', 'block must contain exactly one valid Gutenberg block.', [ 'status' => 400 ] );
 		}
@@ -158,39 +158,52 @@ class CloseHub_Content_Abilities {
 			return new WP_Error( 'closehub_block_type_mismatch', 'The replacement block must have the expected Gutenberg block type.', [ 'status' => 400 ] );
 		}
 
-		if ( ! self::acquire_post_lock( $post_id ) ) {
-			return new WP_Error( 'closehub_post_locked', 'Post is being updated. Get the post again and retry.', [ 'status' => 409 ] );
+		if ( ! hash_equals( hash( 'sha256', $post->post_content ), $expected_hash ) ) {
+			return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
 		}
-		try {
-			// Re-read inside the per-post lock so the hash check and the write use
-			// the same snapshot instead of allowing two stale requests to race.
-			$post = get_post( $post_id );
-			if ( ! $post || ! hash_equals( hash( 'sha256', $post->post_content ), $expected_hash ) ) {
-				return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
-			}
-			$blocks = self::replace_block_at_path( parse_blocks( $post->post_content ), $path, $replacement[0], $expected_name );
-			if ( $blocks instanceof WP_Error ) {
-				return $blocks;
-			}
-			$updated = wp_update_post( [ 'ID' => $post_id, 'post_content' => wp_slash( serialize_blocks( $blocks ) ) ], true );
-			if ( $updated instanceof WP_Error ) {
-				return $updated;
-			}
-		} finally {
-			self::release_post_lock( $post_id );
+		$blocks = self::replace_block_at_path( parse_blocks( $post->post_content ), $path, $replacement[0], $expected_name );
+		if ( $blocks instanceof WP_Error ) {
+			return $blocks;
+		}
+		$updated = self::replace_post_content_if_current( $post, serialize_blocks( $blocks ) );
+		if ( $updated instanceof WP_Error ) {
+			return $updated;
 		}
 
-		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => hash( 'sha256', get_post_field( 'post_content', $post_id ) ) ];
+		$post = get_post( $post_id );
+		return [ 'post_id' => $post_id, 'block_path' => $path, 'block_name' => $expected_name, 'content_hash' => hash( 'sha256', $post->post_content ) ];
 	}
 
 	private static function canonical_block_name( string $block_name ): string {
 		return '' === $block_name || str_contains( $block_name, '/' ) ? $block_name : 'core/' . $block_name;
 	}
-	private static function acquire_post_lock( int $post_id ): bool {
-		return add_option( 'closehub_gutenberg_lock_' . $post_id, time(), '', 'no' );
-	}
-	private static function release_post_lock( int $post_id ): void {
-		delete_option( 'closehub_gutenberg_lock_' . $post_id );
+	/**
+	 * Atomically replace content only when the raw database value is still the
+	 * one returned by get-post. A PHP-level lock cannot coordinate Gutenberg,
+	 * REST, or third-party writers that do not opt into it; this compare-and-swap
+	 * does, and it cannot leave an abandoned lock behind.
+	 */
+	private static function replace_post_content_if_current( WP_Post $post, string $content ): true|WP_Error {
+		global $wpdb;
+		$updated = $wpdb->update(
+			$wpdb->posts,
+			[
+				'post_content'      => $content,
+				'post_modified'     => current_time( 'mysql' ),
+				'post_modified_gmt' => current_time( 'mysql', true ),
+			],
+			[ 'ID' => $post->ID, 'post_content' => $post->post_content ],
+			[ '%s', '%s', '%s' ],
+			[ '%d', '%s' ]
+		);
+		if ( false === $updated ) {
+			return new WP_Error( 'closehub_post_update_failed', 'Post could not be updated.', [ 'status' => 500 ] );
+		}
+		if ( 0 === $updated ) {
+			return new WP_Error( 'closehub_content_changed', 'Post content has changed. Get the post again before replacing a block.', [ 'status' => 409 ] );
+		}
+		clean_post_cache( $post->ID );
+		return true;
 	}
 
 	/** @return array<array<string,mixed>|WP_Error>|WP_Error */

@@ -105,6 +105,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= 1.1.2 =
+* Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)
+* Added precise Gutenberg block replacement through MCP, with content-hash concurrency protection and block-path/type validation, plus an MCP ability to update a post slug and return its normalized URL. (#29)
+
 = 1.1.1 =
 * Added 11 MCP "site" abilities covering the CLOSE web go-live checklist: domain search-replace, robots.txt content, per-page noindex, permalink flush, `.htaccess` read, timezone/admin email, bulk post-author reassignment, WordPress.org plugin install, unused-plugin listing, plugin/core updates, and client user creation. See the Description section for the full list and required capabilities.
 * Added `post_type` support to all `closehub/*-post` MCP abilities (list-posts, get-post, create-post, update-post, trash-post) and to the `/closehub/v1/posts` REST endpoints. They still default to `post`, but can now read and write pages and WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions) instead of only plain blog posts. Allowed post types are limited to ones registered as public and admin-manageable, so internal WooCommerce records such as orders and coupons, and Media Library attachments, are not exposed as generic content.

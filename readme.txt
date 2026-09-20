@@ -19,6 +19,8 @@ Once the plugin is activated, it generates a secure API key and exposes a dedica
 
 It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, update a post slug, replace one exact Gutenberg block, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. `closehub/update-post-slug` accepts a post ID and slug, then returns the normalized unique slug and resulting URL. `closehub/get-post` returns a `content_hash`; use it with `closehub/replace-gutenberg-block`, a zero-based `block_path`, the current block name, and one replacement serialized block so a stale read cannot overwrite newer content. These abilities default to the `post` type but accept a `post_type` input for any other post type registered with an admin UI — pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), or custom post types. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
 
+When WPML is active, create-post and `POST /closehub/v1/posts` also accept `language` and an optional `translation_of` source post ID. The connector assigns the new post to the requested language and joins it to the source post's translation group. List/get/create responses include the language and translation-group details. Existing posts retain their language on update.
+
 For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
 
 It also exposes a set of "site" abilities for the CLOSE web go-live checklist — configuration steps that used to be manual or wp-cli only. Each requires the WordPress capability noted below.
@@ -51,7 +53,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 **Available endpoints:**
 
 * `GET /closehub/v1/ping` — verify the connection
-* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, and categories
+* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, categories, and WPML `language`/`translation_of` when WPML is active
 * `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)

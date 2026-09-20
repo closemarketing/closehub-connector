@@ -45,6 +45,7 @@ function closehub_init(): void {
 
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-api-key.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-oauth.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-wpml.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-rest-api.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';

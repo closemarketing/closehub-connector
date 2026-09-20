@@ -48,6 +48,8 @@ class CloseHub_REST_API {
 					'default'           => 'post',
 					'sanitize_callback' => 'sanitize_key',
 				],
+				'language' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_key' ],
+				'translation_of' => [ 'required' => false, 'type' => 'integer', 'sanitize_callback' => 'absint' ],
 			],
 		] );
 
@@ -292,6 +294,12 @@ class CloseHub_REST_API {
 		}
 
 		$requested_status = $request->get_param( 'status' );
+		$language         = (string) ( $request->get_param( 'language' ) ?? '' );
+		$translation_of   = absint( $request->get_param( 'translation_of' ) );
+		$language_error   = CloseHub_WPML::validate( $language, $translation_of );
+		if ( is_wp_error( $language_error ) ) {
+			return $language_error;
+		}
 
 		// Keep the post non-public while its metadata is being saved. This makes
 		// every publication hook see the final categories, thumbnail, and SEO data.
@@ -305,6 +313,10 @@ class CloseHub_REST_API {
 
 		if ( is_wp_error( $post_id ) ) {
 			return $post_id;
+		}
+		$assigned = CloseHub_WPML::assign( $post_id, $language, $translation_of );
+		if ( is_wp_error( $assigned ) ) {
+			return $this->rollback_post( $post_id, $assigned );
 		}
 
 		$result = $this->save_post_metadata( $post_id, $request );
@@ -412,7 +424,7 @@ class CloseHub_REST_API {
 
 	/** Post id/link plus whichever SEO and featured-image data is stored for it. */
 	private function post_response( int $post_id ): array {
-		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ) ] + self::cms_metadata( $post_id );
+		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id );
 	}
 
 	/**

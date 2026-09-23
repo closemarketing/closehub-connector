@@ -32,7 +32,7 @@ includes/
     class-admin.php             Settings → CloseHub admin page
     class-oauth.php             MCP OAuth 2.1 + PKCE authorization server
     class-content-abilities.php MCP abilities for posts/orders (list/get/create/update/trash, precise Gutenberg block replacement, WooCommerce order summary)
-    class-site-abilities.php    MCP abilities for the go-live checklist (search-replace, robots.txt, noindex, permalinks, .htaccess, timezone/email, author reassign, plugin install/update, user creation)
+    class-site-abilities.php    MCP abilities for the go-live checklist (search-replace, robots.txt, noindex, permalinks, .htaccess, timezone/email, author reassign, plugin install/update, user creation, cache purge)
 ```
 
 ## REST API
@@ -109,6 +109,15 @@ The counterpart lives in `/Users/davidperez/Apps/app-closehub`. The WordPress in
 - `app/Services/WordPress/WordPressAuth.php` — builds the authenticated HTTP client
 
 Those classes currently use Basic Auth (username + app password) + WooCommerce consumer key/secret. They will need to be updated to send `X-CloseHub-Key` to the plugin endpoints instead.
+
+### Cache purge (`closehub/clear-cache`)
+
+`CloseHub_Site_Abilities::clear_cache()` dispatches to the first active entry of `cache_providers()`, a slug-keyed list (`label`, `is_active`, `purge`) passed through the `closehub_clear_cache_providers` filter. Only WP Rocket (`wp-rocket`, via `rocket_clean_domain()` / `rocket_clean_post()` / `rocket_clean_minify()`) ships today. To support another cache plugin, add one entry whose `purge( $scope, $post_ids, $minify )` returns `{ cleared, post_ids, failed_post_ids?, minify_cleared? }` — the ability's input/output contract must not change. Always use the cache plugin's public API, never delete cache files directly. It purges the current blog only, like every other site ability.
+
+Multisite caveats (WP Rocket):
+- `rocket_clean_domain()` resolves the current blog's home URL and `rocket_clean_minify()` uses `get_current_blog_id()`, so both target the right site after `switch_to_blog()`.
+- `rocket_clean_domain()` runs only once per request (it bails once `rocket_after_clean_domain` has fired), and both it and `rocket_clean_post()` return void while `rocket_is_importing()` is true. `purge_wp_rocket()` checks those conditions up front and reports `cleared: false` instead of reading void as success. A future network-wide fan-out would need a separate request per blog, or a WP Rocket API that allows it, to purge more than the first site.
+- On a subdirectory network, the main site's cache folder (`cache/wp-rocket/<host>/`) contains the subsites' folders, and WP Rocket does not preserve them, so `scope=all` on the main site also purges every subsite. That's WP Rocket's behavior; we don't delete files ourselves to work around it.
 
 When changing a code path used by a registered MCP ability, update the ability schema and permission checks as needed so its behavior stays aligned with the REST endpoint.
 

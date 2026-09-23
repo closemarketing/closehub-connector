@@ -48,7 +48,7 @@ function set_transient( string $key, $value, int $expiration ): bool { $GLOBALS[
 function is_wp_error( $thing ): bool { return false; }
 function wp_safe_remote_get( string $url, array $args ): array {
 	if ( isset( $GLOBALS['closehub_test_client_metadata'][ $url ] ) ) { return $GLOBALS['closehub_test_client_metadata'][ $url ]; }
-	return [ 'response' => [ 'code' => 200 ], 'headers' => [ 'content-type' => 'application/json; charset=UTF-8' ], 'body' => str_contains( $url, 'oauth-protected-resource' ) ? wp_json_encode( [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ 'mcp:tools' ] ] ) : wp_json_encode( [ 'issuer' => home_url(), 'authorization_endpoint' => rest_url( 'closehub-oauth/v1/authorize' ), 'token_endpoint' => rest_url( 'closehub-oauth/v1/token' ), 'registration_endpoint' => rest_url( 'closehub-oauth/v1/register' ), 'revocation_endpoint' => rest_url( 'closehub-oauth/v1/revoke' ), 'response_types_supported' => [ 'code' ], 'grant_types_supported' => [ 'authorization_code', 'refresh_token' ], 'token_endpoint_auth_methods_supported' => [ 'none' ], 'code_challenge_methods_supported' => [ 'S256' ], 'scopes_supported' => [ 'mcp:tools' ] ] ) ];
+	return [ 'response' => [ 'code' => 200 ], 'headers' => [ 'content-type' => 'application/json; charset=UTF-8' ], 'body' => str_contains( $url, 'oauth-protected-resource' ) ? wp_json_encode( [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ 'mcp:tools' ] ] ) : wp_json_encode( [ 'issuer' => home_url(), 'authorization_endpoint' => rest_url( 'closehub-oauth/v1/authorize' ), 'token_endpoint' => rest_url( 'closehub-oauth/v1/token' ), 'registration_endpoint' => rest_url( 'closehub-oauth/v1/register' ), 'revocation_endpoint' => rest_url( 'closehub-oauth/v1/revoke' ), 'response_types_supported' => [ 'code' ], 'grant_types_supported' => [ 'authorization_code', 'refresh_token' ], 'token_endpoint_auth_methods_supported' => [ 'none' ], 'code_challenge_methods_supported' => [ 'S256' ], 'client_id_metadata_document_supported' => true, 'scopes_supported' => [ 'mcp:tools' ] ] ) ];
 }
 function wp_remote_retrieve_response_code( array $response ): int { return $response['response']['code']; }
 function wp_remote_retrieve_header( array $response, string $header ): string { return $response['headers'][ $header ] ?? ''; }
@@ -108,6 +108,44 @@ closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://localhost:1234
 closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://127.0.0.1/callback' ), 'An http://127.0.0.1 redirect URI must be valid.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'http://attacker.example/callback' ), 'A plain-http non-localhost redirect URI must be rejected.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'javascript:alert(1)' ), 'A javascript: redirect URI must be rejected.' );
+
+// ── Client ID Metadata Documents (CIMD) ─────────────────────────────────────
+
+$claude_client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+$GLOBALS['closehub_test_client_metadata'][ $claude_client_id ] = [
+	'response' => [ 'code' => 200 ],
+	'headers' => [],
+	'body' => wp_json_encode( [
+		'client_id' => $claude_client_id,
+		'client_name' => 'Claude',
+		'redirect_uris' => [ 'https://claude.ai/api/mcp/auth_callback' ],
+	] ),
+];
+
+$oauth_server_metadata = CloseHub_OAuth::server_metadata()->get_data();
+closehub_test_assert( true === $oauth_server_metadata['client_id_metadata_document_supported'], 'OAuth metadata must advertise Client ID Metadata Document support.' );
+
+$valid_authorize = new ReflectionMethod( CloseHub_OAuth::class, 'valid_authorize' );
+$valid_authorize->setAccessible( true );
+$cimd_client = $valid_authorize->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $claude_client_id,
+	'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( is_array( $cimd_client ) && 'Claude' === $cimd_client['client_name'], 'A hosted client metadata document must authorize without prior dynamic registration.' );
+
+$invalid_cimd_client = $valid_authorize->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $claude_client_id,
+	'redirect_uri' => 'https://attacker.example/callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A hosted client metadata document must reject an unlisted redirect URI.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of
@@ -261,8 +299,6 @@ closehub_test_assert( 'Claude refreshed metadata' === $wpdb->clients[ $client_id
 
 // ── unknown clients are distinct from malformed authorization parameters ────
 
-$valid_authorize = new ReflectionMethod( CloseHub_OAuth::class, 'valid_authorize' );
-$valid_authorize->setAccessible( true );
 $unknown_client = $valid_authorize->invoke( null, [
 	'response_type' => 'code',
 	'client_id' => 'chc-no-longer-registered',

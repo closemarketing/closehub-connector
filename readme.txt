@@ -106,6 +106,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = Unreleased =
+* Fixed CloseHub content and site abilities not being exposed as direct tools by the default MCP server.
 * Fixed Claude and other hosted MCP clients that identify themselves with a Client ID Metadata Document: OAuth authorization now validates that document directly when no prior dynamic registration exists, and advertises that capability in the authorization-server metadata. Re-registering the same verified client is idempotent and refreshes its stored metadata instead of failing on a duplicate client ID. (#34)
 
 = 1.1.2 =

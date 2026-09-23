@@ -273,8 +273,21 @@ class CloseHub_OAuth {
 		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
 		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return self::error( 'invalid_redirect_uri', 'Redirect URIs must use HTTPS or localhost HTTP.' ); } }
 		$id = '' !== $metadata_client_id ? $metadata_client_id : 'chc_' . bin2hex( random_bytes( 24 ) ); global $wpdb;
-		if ( false === $wpdb->insert( self::table( 'clients' ), [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => wp_json_encode( $uris ), 'created_at' => current_time( 'mysql', true ) ], [ '%s', '%s', '%s', '%s' ] ) ) { return self::error( 'server_error', 'Could not register the client.', 500 ); }
-		return new WP_REST_Response( [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris, 'grant_types' => [ 'authorization_code', 'refresh_token' ], 'response_types' => [ 'code' ], 'token_endpoint_auth_method' => 'none' ], 201 );
+		$client_data = [ 'client_name' => $name, 'redirect_uris' => wp_json_encode( $uris ) ];
+		$response_data = [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris, 'grant_types' => [ 'authorization_code', 'refresh_token' ], 'response_types' => [ 'code' ], 'token_endpoint_auth_method' => 'none' ];
+
+		// Client ID Metadata Documents identify a client by a stable URL. A
+		// reconnect may therefore register the same verified client more than
+		// once; refresh it instead of rejecting the duplicate primary key.
+		if ( self::client( $id ) ) {
+			if ( false === $wpdb->update( self::table( 'clients' ), $client_data, [ 'client_id' => $id ], [ '%s', '%s' ], [ '%s' ] ) ) {
+				return self::error( 'server_error', 'Could not update the client registration.', 500 );
+			}
+			return new WP_REST_Response( $response_data, 200 );
+		}
+
+		if ( false === $wpdb->insert( self::table( 'clients' ), array_merge( [ 'client_id' => $id ], $client_data, [ 'created_at' => current_time( 'mysql', true ) ] ), [ '%s', '%s', '%s', '%s' ] ) ) { return self::error( 'server_error', 'Could not register the client.', 500 ); }
+		return new WP_REST_Response( $response_data, 201 );
 	}
 
 	public static function authorize_get( WP_REST_Request $request ) {
@@ -359,7 +372,14 @@ class CloseHub_OAuth {
 	// in an already-escaping context (esc_attr(), add_query_arg()), never
 	// rendered as raw HTML, so leaving them unsanitized here is safe.
 	private static function params( WP_REST_Request $r ): array { return [ 'response_type' => sanitize_text_field( (string) $r->get_param( 'response_type' ) ), 'client_id' => (string) $r->get_param( 'client_id' ), 'redirect_uri' => esc_url_raw( (string) $r->get_param( 'redirect_uri' ) ), 'state' => (string) $r->get_param( 'state' ), 'challenge' => sanitize_text_field( (string) $r->get_param( 'code_challenge' ) ), 'method' => sanitize_text_field( (string) $r->get_param( 'code_challenge_method' ) ) ]; }
-	private static function valid_authorize( array $p ): array|WP_Error { $c = self::client( $p['client_id'] ); if ( 'code' !== $p['response_type'] || ! $c || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); } return $c; }
+	private static function valid_authorize( array $p ): array|WP_Error {
+		$c = self::client( $p['client_id'] );
+		if ( ! $c ) {
+			return self::error( 'invalid_client', 'The OAuth client is unknown or no longer registered.' );
+		}
+		if ( 'code' !== $p['response_type'] || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+		return $c;
+	}
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
 	private static function resource_data(): array { return [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ self::SCOPE ] ]; }

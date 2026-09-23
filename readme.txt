@@ -36,6 +36,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/list-unused-plugins` (`activate_plugins`, read-only) — List installed plugins that are not currently active, as removal candidates. Takes no parameters.
 * `closehub/update-plugins-and-core` (`update_plugins` and `update_core`) — Update every plugin with an available update and WordPress core to the latest version, with a per-plugin success result. Takes no parameters.
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
+* `closehub/clear-cache` (`rocket_purge_cache` or `manage_options`) — Purge the page cache of the active caching plugin (currently WP Rocket). `scope` is `all` (default, whole site) or `posts` (only the given `post_ids`; IDs that don't match a post are reported back in `invalid_post_ids`). Pass `minify: true` to also clear minified CSS/JS files. Returns `503` when no supported cache plugin is active. Example: `{ "scope": "posts", "post_ids": [ 42, 57 ] }`.
 
 **What it replaces:**
 

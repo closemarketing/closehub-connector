@@ -62,6 +62,10 @@ class CloseHub_Site_Abilities {
 		self::ability( 'closehub/create-site-user', 'Create a client user', 'Create a WordPress user for the site\'s client with the Administrator or Editor role.', [ self::class, 'create_site_user' ], [ self::class, 'can_create_user' ], false, false, [
 			'email' => [ 'type' => 'string' ], 'username' => [ 'type' => 'string' ], 'role' => [ 'type' => 'string', 'enum' => [ 'administrator', 'editor' ], 'default' => 'editor' ], 'send_notification' => [ 'type' => 'boolean', 'default' => true ],
 		], [ 'email' ] );
+
+		self::ability( 'closehub/clear-cache', 'Clear site cache', 'Purge the page cache of the active caching plugin (currently WP Rocket). Can clear the whole site or only specific posts.', [ self::class, 'clear_cache' ], [ self::class, 'can_clear_cache' ], false, true, [
+			'scope' => [ 'type' => 'string', 'enum' => [ 'all', 'posts' ], 'default' => 'all' ], 'post_ids' => [ 'type' => 'array', 'items' => [ 'type' => 'integer' ] ], 'minify' => [ 'type' => 'boolean', 'default' => false ],
+		] );
 	}
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
@@ -81,6 +85,8 @@ class CloseHub_Site_Abilities {
 	public static function can_install_plugins(): bool { return current_user_can( 'install_plugins' ); }
 	public static function can_view_plugins(): bool { return current_user_can( 'activate_plugins' ); }
 	public static function can_update_site(): bool { return current_user_can( 'update_plugins' ) && current_user_can( 'update_core' ); }
+	/** WP Rocket registers rocket_purge_cache so non-admin roles can be allowed to purge; respect it alongside manage_options. */
+	public static function can_clear_cache(): bool { return current_user_can( 'rocket_purge_cache' ) || current_user_can( 'manage_options' ); }
 
 	/** A caller may only request the administrator role if they can promote users to it. */
 	public static function can_create_user( $input ): bool {
@@ -440,5 +446,118 @@ class CloseHub_Site_Abilities {
 		}
 
 		return [ 'user_id' => $user_id, 'username' => $username, 'email' => $email, 'role' => $role ];
+	}
+
+	// ── Cache purge ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Purges the current blog's page cache through the first active provider.
+	 * On multisite this only touches the current blog, like every other site
+	 * ability; WP Rocket's functions resolve the blog's own URLs.
+	 */
+	public static function clear_cache( $input ): array|WP_Error {
+		$scope  = (string) ( $input['scope'] ?? 'all' );
+		$minify = ! empty( $input['minify'] );
+		if ( ! in_array( $scope, [ 'all', 'posts' ], true ) ) {
+			return new WP_Error( 'closehub_cache_invalid_scope', 'scope must be all or posts.', [ 'status' => 400 ] );
+		}
+
+		$post_ids = [];
+		$invalid  = [];
+		if ( 'posts' === $scope ) {
+			$requested = array_values( array_unique( array_map( 'absint', (array) ( $input['post_ids'] ?? [] ) ) ) );
+			if ( ! $requested ) {
+				return new WP_Error( 'closehub_cache_post_ids_required', 'post_ids is required when scope is posts.', [ 'status' => 400 ] );
+			}
+			foreach ( $requested as $post_id ) {
+				if ( $post_id && get_post( $post_id ) ) {
+					$post_ids[] = $post_id;
+				} else {
+					$invalid[] = $post_id;
+				}
+			}
+			if ( ! $post_ids ) {
+				return new WP_Error( 'closehub_cache_posts_not_found', 'None of the given post_ids match an existing post.', [ 'status' => 404, 'invalid_post_ids' => $invalid ] );
+			}
+		}
+
+		$providers = self::cache_providers();
+		$slug      = self::detect_cache_provider( $providers );
+		if ( null === $slug ) {
+			$labels = implode( ', ', array_filter( array_map( static fn( $p ) => $p['label'] ?? '', $providers ) ) );
+			return new WP_Error( 'closehub_cache_no_provider', sprintf( 'No supported cache plugin is active (supported: %s).', $labels ), [ 'status' => 503 ] );
+		}
+
+		$result = call_user_func( $providers[ $slug ]['purge'], $scope, $post_ids, $minify );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$output = [ 'provider' => $slug, 'scope' => $scope, 'cleared' => ! empty( $result['cleared'] ), 'post_ids' => array_values( (array) ( $result['post_ids'] ?? [] ) ) ];
+		if ( ! empty( $result['failed_post_ids'] ) ) {
+			$output['failed_post_ids'] = array_values( $result['failed_post_ids'] );
+		}
+		if ( $invalid ) {
+			$output['invalid_post_ids'] = $invalid;
+		}
+		if ( $minify ) {
+			$output['minify_cleared'] = ! empty( $result['minify_cleared'] );
+		}
+		return $output;
+	}
+
+	/**
+	 * Supported cache providers, keyed by slug. Each entry has a `label`, an
+	 * `is_active` callable, and a `purge( string $scope, int[] $post_ids, bool $minify )`
+	 * callable returning `{ cleared, post_ids, failed_post_ids?, minify_cleared? }`
+	 * or a WP_Error. Filterable so more cache plugins can be added without
+	 * changing the ability's input/output contract; the first active one wins.
+	 */
+	private static function cache_providers(): array {
+		return (array) apply_filters( 'closehub_clear_cache_providers', [
+			'wp-rocket' => [
+				'label'     => 'WP Rocket',
+				'is_active' => static fn(): bool => function_exists( 'rocket_clean_domain' ) && function_exists( 'rocket_clean_post' ),
+				'purge'     => [ self::class, 'purge_wp_rocket' ],
+			],
+		] );
+	}
+
+	private static function detect_cache_provider( array $providers ): ?string {
+		foreach ( $providers as $slug => $provider ) {
+			if ( isset( $provider['is_active'], $provider['purge'] ) && is_callable( $provider['is_active'] ) && is_callable( $provider['purge'] ) && call_user_func( $provider['is_active'] ) ) {
+				return (string) $slug;
+			}
+		}
+		return null;
+	}
+
+	/** Uses WP Rocket's public API only; never deletes files under wp-content/cache/wp-rocket/ directly. */
+	public static function purge_wp_rocket( string $scope, array $post_ids, bool $minify ): array {
+		$result = [ 'cleared' => false, 'post_ids' => [], 'failed_post_ids' => [] ];
+
+		if ( 'all' === $scope ) {
+			// Returns void in older WP Rocket versions and bool in newer ones; only an explicit false is a failure.
+			$result['cleared'] = function_exists( 'rocket_clean_domain' ) && false !== rocket_clean_domain(); // With preload enabled, WP Rocket re-warms the cache itself.
+		} else {
+			foreach ( $post_ids as $post_id ) {
+				if ( function_exists( 'rocket_clean_post' ) && false !== rocket_clean_post( $post_id ) ) {
+					$result['post_ids'][] = $post_id;
+				} else {
+					$result['failed_post_ids'][] = $post_id;
+				}
+			}
+			$result['cleared'] = (bool) $result['post_ids'];
+		}
+
+		if ( $minify ) {
+			$result['minify_cleared'] = false;
+			if ( function_exists( 'rocket_clean_minify' ) ) {
+				rocket_clean_minify();
+				$result['minify_cleared'] = true;
+			}
+		}
+
+		return $result;
 	}
 }

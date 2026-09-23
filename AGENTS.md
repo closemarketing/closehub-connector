@@ -32,7 +32,7 @@ includes/
     class-admin.php             Settings → CloseHub admin page
     class-oauth.php             MCP OAuth 2.1 + PKCE authorization server
     class-content-abilities.php MCP abilities for posts/orders (list/get/create/update/trash, precise Gutenberg block replacement, WooCommerce order summary)
-    class-site-abilities.php    MCP abilities for the go-live checklist (search-replace, robots.txt, noindex, permalinks, .htaccess, timezone/email, author reassign, plugin install/update, user creation)
+    class-site-abilities.php    MCP abilities for the go-live checklist (search-replace, robots.txt, noindex, permalinks, .htaccess, timezone/email, author reassign, WordPress.org plugin install, bulk plugin/core updates, plugin/theme ZIP upload+install/update, user creation)
 ```
 
 ## REST API

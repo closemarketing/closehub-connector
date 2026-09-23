@@ -62,6 +62,10 @@ class CloseHub_Site_Abilities {
 		self::ability( 'closehub/create-site-user', 'Create a client user', 'Create a WordPress user for the site\'s client with the Administrator or Editor role.', [ self::class, 'create_site_user' ], [ self::class, 'can_create_user' ], false, false, [
 			'email' => [ 'type' => 'string' ], 'username' => [ 'type' => 'string' ], 'role' => [ 'type' => 'string', 'enum' => [ 'administrator', 'editor' ], 'default' => 'editor' ], 'send_notification' => [ 'type' => 'boolean', 'default' => true ],
 		], [ 'email' ] );
+
+		self::ability( 'closehub/upload-package-zip', 'Upload a plugin or theme ZIP', 'Install a plugin or theme from an uploaded ZIP (as base64 or a URL), or update it in place if a package with the same slug is already installed.', [ self::class, 'upload_package_zip' ], [ self::class, 'can_manage_package' ], false, false, [
+			'type' => [ 'type' => 'string', 'enum' => [ 'plugin', 'theme' ] ], 'zip_base64' => [ 'type' => 'string' ], 'zip_url' => [ 'type' => 'string' ], 'overwrite' => [ 'type' => 'boolean', 'default' => true ], 'activate' => [ 'type' => 'boolean', 'default' => false ],
+		], [ 'type' ], true );
 	}
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
@@ -81,6 +85,23 @@ class CloseHub_Site_Abilities {
 	public static function can_install_plugins(): bool { return current_user_can( 'install_plugins' ); }
 	public static function can_view_plugins(): bool { return current_user_can( 'activate_plugins' ); }
 	public static function can_update_site(): bool { return current_user_can( 'update_plugins' ) && current_user_can( 'update_core' ); }
+
+	/** Required capabilities depend on the package type and on whether this call would overwrite or activate. */
+	public static function can_manage_package( $input ): bool {
+		$type      = sanitize_key( (string) ( is_array( $input ) ? ( $input['type'] ?? '' ) : '' ) );
+		$overwrite = ! is_array( $input ) || ! isset( $input['overwrite'] ) || $input['overwrite'];
+		$activate  = is_array( $input ) && ! empty( $input['activate'] );
+
+		if ( 'theme' === $type ) {
+			return current_user_can( 'install_themes' )
+				&& ( ! $overwrite || current_user_can( 'update_themes' ) )
+				&& ( ! $activate || current_user_can( 'switch_themes' ) );
+		}
+
+		return current_user_can( 'install_plugins' )
+			&& ( ! $overwrite || current_user_can( 'update_plugins' ) )
+			&& ( ! $activate || current_user_can( 'activate_plugins' ) );
+	}
 
 	/** A caller may only request the administrator role if they can promote users to it. */
 	public static function can_create_user( $input ): bool {
@@ -338,6 +359,241 @@ class CloseHub_Site_Abilities {
 		}
 
 		return [ 'slug' => $slug, 'plugin_file' => $upgrader->plugin_info(), 'installed' => true, 'activated' => false ];
+	}
+
+	// ── Plugin/theme ZIP upload ──────────────────────────────────────────────────
+
+	public static function upload_package_zip( $input ): array|WP_Error {
+		$type = sanitize_key( (string) ( $input['type'] ?? '' ) );
+		if ( ! in_array( $type, [ 'plugin', 'theme' ], true ) ) {
+			return new WP_Error( 'closehub_invalid_package_type', 'type must be plugin or theme.', [ 'status' => 400 ] );
+		}
+
+		if ( ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) || ( function_exists( 'wp_is_file_mod_allowed' ) && ! wp_is_file_mod_allowed( 'closehub_upload_package' ) ) ) {
+			return new WP_Error( 'closehub_file_mods_disallowed', 'File modifications are disallowed on this site.', [ 'status' => 403 ] );
+		}
+
+		$overwrite = ! isset( $input['overwrite'] ) || (bool) $input['overwrite'];
+		$activate  = ! empty( $input['activate'] );
+
+		$package = self::fetch_package_zip( $input );
+		if ( is_wp_error( $package ) ) {
+			return $package;
+		}
+		[ $zip_path, $is_temp ] = $package;
+
+		$info = self::inspect_package_zip( $zip_path, $type );
+		if ( is_wp_error( $info ) ) {
+			if ( $is_temp ) { wp_delete_file( $zip_path ); }
+			return $info;
+		}
+		[ $slug, $incoming_version ] = $info;
+
+		$previous_version = 'plugin' === $type ? self::installed_plugin_version( $slug ) : self::installed_theme_version( $slug );
+		if ( null !== $previous_version && ! $overwrite ) {
+			if ( $is_temp ) { wp_delete_file( $zip_path ); }
+			return new WP_Error( 'closehub_package_exists', sprintf( 'A %s with slug "%s" is already installed; pass overwrite: true to update it.', $type, $slug ), [ 'status' => 409 ] );
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		require_once ABSPATH . 'wp-admin/includes/theme.php';
+
+		$skin     = new WP_Ajax_Upgrader_Skin();
+		$upgrader = 'plugin' === $type ? new Plugin_Upgrader( $skin ) : new Theme_Upgrader( $skin );
+		$result   = $upgrader->install( $zip_path, [ 'overwrite_package' => $overwrite ] );
+
+		if ( $is_temp ) {
+			wp_delete_file( $zip_path );
+		}
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( is_wp_error( $skin->result ) ) {
+			return $skin->result;
+		}
+		if ( ! $result ) {
+			$errors = $skin->get_errors();
+			return new WP_Error( 'closehub_package_install_failed', $errors && $errors->has_errors() ? $errors->get_error_message() : ucfirst( $type ) . ' installation failed.', [ 'status' => 500 ] );
+		}
+
+		$file = 'plugin' === $type ? $upgrader->plugin_info() : $upgrader->theme_info();
+
+		if ( 'plugin' === $type ) {
+			$plugins = get_plugins();
+			$version = isset( $plugins[ $file ] ) ? (string) $plugins[ $file ]['Version'] : $incoming_version;
+		} else {
+			$version = self::installed_theme_version( $slug ) ?? $incoming_version;
+		}
+
+		$active = false;
+		if ( $activate ) {
+			if ( 'plugin' === $type && $file ) {
+				$activated = activate_plugin( $file );
+				$active    = ! is_wp_error( $activated );
+			} elseif ( 'theme' === $type ) {
+				switch_theme( $slug );
+				$active = true;
+			}
+		}
+
+		return [
+			'type'             => $type,
+			'action'           => null === $previous_version ? 'installed' : 'updated',
+			'slug'             => $slug,
+			'file'             => $file,
+			'previous_version' => $previous_version,
+			'version'          => $version,
+			'active'           => $active,
+		];
+	}
+
+	/**
+	 * Resolves the input's zip_base64 or zip_url into a local file path.
+	 *
+	 * @return array{0: string, 1: bool}|WP_Error [ path, is_temp_file ] on success.
+	 */
+	public static function fetch_package_zip( array $input ): array|WP_Error {
+		$has_base64 = ! empty( $input['zip_base64'] );
+		$has_url    = ! empty( $input['zip_url'] );
+		if ( $has_base64 === $has_url ) {
+			return new WP_Error( 'closehub_package_source_required', 'Provide exactly one of zip_base64 or zip_url.', [ 'status' => 400 ] );
+		}
+
+		$max_bytes = (int) apply_filters( 'closehub_upload_package_max_bytes', wp_max_upload_size() );
+
+		if ( $has_url ) {
+			$url = esc_url_raw( (string) $input['zip_url'] );
+			if ( 'https' !== wp_parse_url( $url, PHP_URL_SCHEME ) ) {
+				return new WP_Error( 'closehub_package_url_invalid', 'zip_url must use https.', [ 'status' => 400 ] );
+			}
+
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			$path = download_url( $url, 300 );
+			if ( is_wp_error( $path ) ) {
+				return $path;
+			}
+			if ( filesize( $path ) > $max_bytes ) {
+				wp_delete_file( $path );
+				return new WP_Error( 'closehub_package_too_large', 'The downloaded file exceeds the maximum allowed size.', [ 'status' => 413 ] );
+			}
+			if ( ! self::looks_like_zip( $path ) ) {
+				wp_delete_file( $path );
+				return new WP_Error( 'closehub_package_not_zip', 'The downloaded file is not a valid ZIP archive.', [ 'status' => 400 ] );
+			}
+
+			return [ $path, true ];
+		}
+
+		$raw = base64_decode( (string) $input['zip_base64'], true );
+		if ( false === $raw ) {
+			return new WP_Error( 'closehub_package_invalid_base64', 'zip_base64 is not valid base64 data.', [ 'status' => 400 ] );
+		}
+		if ( strlen( $raw ) > $max_bytes ) {
+			return new WP_Error( 'closehub_package_too_large', 'The decoded file exceeds the maximum allowed size.', [ 'status' => 413 ] );
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$path = wp_tempnam( 'closehub-package.zip' );
+		if ( false === file_put_contents( $path, $raw ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			return new WP_Error( 'closehub_package_write_failed', 'Could not write the uploaded file to a temporary location.', [ 'status' => 500 ] );
+		}
+		if ( ! self::looks_like_zip( $path ) ) {
+			wp_delete_file( $path );
+			return new WP_Error( 'closehub_package_not_zip', 'zip_base64 does not contain a valid ZIP archive.', [ 'status' => 400 ] );
+		}
+
+		return [ $path, true ];
+	}
+
+	public static function looks_like_zip( string $path ): bool {
+		$handle = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_fopen
+		if ( ! $handle ) {
+			return false;
+		}
+		$magic = fread( $handle, 4 );
+		fclose( $handle );
+		return "PK\x03\x04" === $magic;
+	}
+
+	/**
+	 * Reads the slug and version out of a package ZIP without fully extracting it:
+	 * for a theme, the style.css header one level deep; for a plugin, the first
+	 * *.php file (one level deep, or at the root for a single-file plugin) whose
+	 * contents contain a "Plugin Name" header.
+	 *
+	 * @return array{0: string, 1: string}|WP_Error [ slug, version ].
+	 */
+	public static function inspect_package_zip( string $zip_path, string $type ): array|WP_Error {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return new WP_Error( 'closehub_zip_extension_missing', 'The PHP zip extension is required to inspect the package.', [ 'status' => 500 ] );
+		}
+
+		$zip = new ZipArchive();
+		if ( true !== $zip->open( $zip_path ) ) {
+			return new WP_Error( 'closehub_package_not_zip', 'Could not open the uploaded ZIP archive.', [ 'status' => 400 ] );
+		}
+
+		$slug         = null;
+		$header_bytes = null;
+
+		for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+			$entry = (string) $zip->getNameIndex( $i );
+			$parts = explode( '/', trim( $entry, '/' ) );
+
+			if ( 'theme' === $type ) {
+				if ( 2 === count( $parts ) && 'style.css' === $parts[1] ) {
+					$slug         = $parts[0];
+					$header_bytes = $zip->getFromIndex( $i );
+					break;
+				}
+				continue;
+			}
+
+			if ( ! str_ends_with( $parts[ count( $parts ) - 1 ], '.php' ) ) {
+				continue;
+			}
+			if ( 2 !== count( $parts ) && 1 !== count( $parts ) ) {
+				continue;
+			}
+			$contents = $zip->getFromIndex( $i );
+			if ( false === $contents || false === stripos( $contents, 'Plugin Name' ) ) {
+				continue;
+			}
+			$slug         = 2 === count( $parts ) ? $parts[0] : basename( $parts[0], '.php' );
+			$header_bytes = $contents;
+			break;
+		}
+		$zip->close();
+
+		if ( null === $slug || null === $header_bytes ) {
+			return new WP_Error( 'closehub_package_header_missing', 'theme' === $type ? 'The ZIP does not contain a style.css with a theme header.' : 'The ZIP does not contain a plugin file with a Plugin Name header.', [ 'status' => 400 ] );
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$header_file = wp_tempnam( 'closehub-package-header' );
+		file_put_contents( $header_file, $header_bytes ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$headers = get_file_data( $header_file, [ 'Version' => 'Version' ] );
+		wp_delete_file( $header_file );
+
+		return [ $slug, (string) ( $headers['Version'] ?? '' ) ];
+	}
+
+	public static function installed_plugin_version( string $slug ): ?string {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		foreach ( get_plugins() as $file => $data ) {
+			if ( $slug === strtok( $file, '/' ) || $file === $slug . '.php' ) {
+				return (string) $data['Version'];
+			}
+		}
+		return null;
+	}
+
+	public static function installed_theme_version( string $slug ): ?string {
+		$theme = wp_get_theme( $slug );
+		return $theme->exists() ? (string) $theme->get( 'Version' ) : null;
 	}
 
 	// ── Unused plugins ──────────────────────────────────────────────────────────

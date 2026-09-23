@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.1.2
-Version: 1.1.2
+Stable tag: 1.1.3
+Version: 1.1.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,6 +36,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/list-unused-plugins` (`activate_plugins`, read-only) — List installed plugins that are not currently active, as removal candidates. Takes no parameters.
 * `closehub/update-plugins-and-core` (`update_plugins` and `update_core`) — Update every plugin with an available update and WordPress core to the latest version, with a per-plugin success result. Takes no parameters.
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
+* `closehub/upload-package-zip` (`install_plugins`/`install_themes`, plus `update_plugins`/`update_themes` when overwriting an already-installed package, plus `activate_plugins`/`switch_themes` when `activate` is `true`) — Install a plugin or theme from an uploaded ZIP, or update it in place if a package with the same slug already exists. Pass exactly one of `zip_base64` or `zip_url` (must be `https`); `overwrite` defaults to `true` and `activate` to `false`. Returns whether the package was `installed` or `updated`, its slug, file, `previous_version`, and resulting `version`. Example: `{ "type": "plugin", "zip_url": "https://example.com/my-plugin.zip", "activate": true }`.
 
 **What it replaces:**
 
@@ -104,6 +105,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= 1.1.3 =
+* Added an MCP ability, `closehub/upload-package-zip`, to install a plugin or theme from an uploaded ZIP (as base64 or a `https` URL), or update it in place when a package with the same slug is already installed — closing the gap left by `closehub/install-wp-org-plugin`, which only covers the WordPress.org directory. (#37)
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

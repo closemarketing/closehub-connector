@@ -105,6 +105,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= Unreleased =
+* Fixed Claude and other hosted MCP clients that identify themselves with a Client ID Metadata Document: OAuth authorization now validates that document directly when no prior dynamic registration exists, and advertises that capability in the authorization-server metadata. Re-registering the same verified client is idempotent and refreshes its stored metadata instead of failing on a duplicate client ID. (#34)
+
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)
 * Added precise Gutenberg block replacement through MCP, with content-hash concurrency protection and block-path/type validation, plus an MCP ability to update a post slug and return its normalized URL. (#29)

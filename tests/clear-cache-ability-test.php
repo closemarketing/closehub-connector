@@ -12,6 +12,8 @@ $GLOBALS['closehub_test_caps']       = [];
 $GLOBALS['closehub_test_posts']      = [ 10, 11 ];
 $GLOBALS['closehub_test_rocket_on']  = false;
 $GLOBALS['closehub_test_rocket_log'] = [];
+$GLOBALS['closehub_test_importing']  = false;
+$GLOBALS['closehub_test_actions']    = [];
 
 function current_user_can( string $capability, ...$args ): bool { return in_array( $capability, $GLOBALS['closehub_test_caps'], true ); }
 function absint( $value ): int { return abs( (int) $value ); }
@@ -25,7 +27,10 @@ function apply_filters( string $hook, $value ) {
 	return $value;
 }
 
+function did_action( string $hook ): int { return $GLOBALS['closehub_test_actions'][ $hook ] ?? 0; }
+
 // WP Rocket's public API, stubbed to record calls.
+function rocket_is_importing(): bool { return $GLOBALS['closehub_test_importing']; }
 function rocket_clean_domain( string $lang = '' ): bool { $GLOBALS['closehub_test_rocket_log'][] = 'domain'; return true; }
 function rocket_clean_post( int $post_id ): bool { $GLOBALS['closehub_test_rocket_log'][] = "post:$post_id"; return true; }
 function rocket_clean_minify( $extensions = [ 'js', 'css' ] ): void { $GLOBALS['closehub_test_rocket_log'][] = 'minify'; }
@@ -75,5 +80,21 @@ $GLOBALS['closehub_test_rocket_log'] = [];
 $minify = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all', 'minify' => true ] );
 if ( is_wp_error( $minify ) || true !== $minify['minify_cleared'] ) { closehub_fail( 'minify=true should report minify_cleared.' ); }
 if ( [ 'domain', 'minify' ] !== $GLOBALS['closehub_test_rocket_log'] ) { closehub_fail( 'minify=true should also call rocket_clean_minify().' ); }
+
+// ── WP Rocket skips (returns void) while importing: report not cleared ───────
+$GLOBALS['closehub_test_rocket_log'] = [];
+$GLOBALS['closehub_test_importing']  = true;
+$importing_all = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all' ] );
+if ( is_wp_error( $importing_all ) || false !== $importing_all['cleared'] ) { closehub_fail( 'scope=all while importing should report cleared=false.' ); }
+$importing_posts = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'posts', 'post_ids' => [ 10 ] ] );
+if ( is_wp_error( $importing_posts ) || false !== $importing_posts['cleared'] || [ 10 ] !== $importing_posts['failed_post_ids'] ) { closehub_fail( 'scope=posts while importing should report the post as failed.' ); }
+if ( $GLOBALS['closehub_test_rocket_log'] ) { closehub_fail( 'No purge should run while importing.' ); }
+$GLOBALS['closehub_test_importing'] = false;
+
+// ── rocket_clean_domain() runs once per request (e.g. after switch_to_blog()): a second call is not reported as cleared ──
+$GLOBALS['closehub_test_actions']['rocket_after_clean_domain'] = 1;
+$second = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all' ] );
+if ( is_wp_error( $second ) || false !== $second['cleared'] ) { closehub_fail( 'A domain purge after one already ran in this request should report cleared=false.' ); }
+if ( $GLOBALS['closehub_test_rocket_log'] ) { closehub_fail( 'rocket_clean_domain() should not be called twice in one request.' ); }
 
 echo "Clear cache ability checks passed.\n";

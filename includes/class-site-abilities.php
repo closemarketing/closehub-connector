@@ -536,12 +536,17 @@ class CloseHub_Site_Abilities {
 	public static function purge_wp_rocket( string $scope, array $post_ids, bool $minify ): array {
 		$result = [ 'cleared' => false, 'post_ids' => [], 'failed_post_ids' => [] ];
 
+		// WP Rocket's purge functions return void (not false) when they skip: while importing, and
+		// rocket_clean_domain() only runs once per request (so a second call after switch_to_blog()
+		// is a no-op). Detect those cases up front instead of reading void as success.
+		$importing = function_exists( 'rocket_is_importing' ) && rocket_is_importing();
+
 		if ( 'all' === $scope ) {
-			// Returns void in older WP Rocket versions and bool in newer ones; only an explicit false is a failure.
-			$result['cleared'] = function_exists( 'rocket_clean_domain' ) && false !== rocket_clean_domain(); // With preload enabled, WP Rocket re-warms the cache itself.
+			// Older WP Rocket versions always return void; only an explicit false is a failure.
+			$result['cleared'] = ! $importing && ! did_action( 'rocket_after_clean_domain' ) && function_exists( 'rocket_clean_domain' ) && false !== rocket_clean_domain(); // With preload enabled, WP Rocket re-warms the cache itself.
 		} else {
 			foreach ( $post_ids as $post_id ) {
-				if ( function_exists( 'rocket_clean_post' ) && false !== rocket_clean_post( $post_id ) ) {
+				if ( ! $importing && function_exists( 'rocket_clean_post' ) && false !== rocket_clean_post( $post_id ) ) {
 					$result['post_ids'][] = $post_id;
 				} else {
 					$result['failed_post_ids'][] = $post_id;

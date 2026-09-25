@@ -48,8 +48,10 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 | GET | `/gravity-forms/forms` | `list_forms()` | Lists all forms with entry count |
 | GET | `/gravity-forms/forms/{id}` | `get_form()` | Form details + last entry date |
 | GET | `/gravity-forms/forms/{id}/entries` | `get_form_entries()` | Entry count for a date range |
+| POST | `/elm-releases` | `create_elm_release()` | Creates an Easy License Manager release and updates the product's WooCommerce download file in one call; args: `product_id` or `product_sku` (one required), `version`, `changelog`, `zip_url`, optional `tested`, `requires`, `requires_php`, `upgrade_notice` |
+| PUT | `/elm-releases/{id}` | `update_elm_release()` | Updates fields on an existing release (all optional; only given fields change) and, if `zip_url` is given, the release's product download file |
 
-WooCommerce and Gravity Forms endpoints return `503` with a clear message if those plugins are not active.
+WooCommerce, Gravity Forms, and Easy License Manager endpoints return `503` with a clear message if those plugins are not active.
 
 ### Multisite behavior
 

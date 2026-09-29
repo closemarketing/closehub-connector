@@ -570,6 +570,16 @@ class CloseHub_REST_API {
 
 		$featured_image_url = $request->get_param( 'featured_image_url' );
 		if ( $featured_image_url ) {
+			// An image uploaded with closehub/upload-media is already a Media
+			// Library attachment. Reuse it instead of downloading a duplicate.
+			$attachment_id = attachment_url_to_postid( $featured_image_url );
+			if ( $attachment_id && 'attachment' === get_post_type( $attachment_id ) ) {
+				if ( ! set_post_thumbnail( $post_id, $attachment_id ) ) {
+					return new WP_Error( 'closehub_featured_image_failed', 'The featured image could not be assigned to the post.' );
+				}
+				return true;
+			}
+
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 			require_once ABSPATH . 'wp-admin/includes/media.php';
 			require_once ABSPATH . 'wp-admin/includes/image.php';

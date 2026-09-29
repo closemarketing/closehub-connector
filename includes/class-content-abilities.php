@@ -3,6 +3,18 @@
 defined( 'ABSPATH' ) || exit;
 
 class CloseHub_Content_Abilities {
+	private const MCP_TOOL_ABILITIES = [
+		'closehub/list-posts',
+		'closehub/get-post',
+		'closehub/create-post',
+		'closehub/update-post',
+		'closehub/upload-media',
+		'closehub/update-post-slug',
+		'closehub/replace-gutenberg-block',
+		'closehub/trash-post',
+		'closehub/get-order-summary',
+	];
+
 	public static function register(): void {
 		if ( ! function_exists( 'wp_register_ability' ) ) {
 			return;
@@ -10,6 +22,13 @@ class CloseHub_Content_Abilities {
 
 		add_action( 'wp_abilities_api_categories_init', [ self::class, 'register_category' ] );
 		add_action( 'wp_abilities_api_init', [ self::class, 'register_abilities' ] );
+		add_filter( 'mcp_adapter_default_server_config', [ self::class, 'add_tools_to_default_server' ] );
+	}
+
+	/** Add CloseHub content abilities as direct tools on the default MCP server. */
+	public static function add_tools_to_default_server( array $config ): array {
+		$config['tools'] = array_values( array_unique( array_merge( $config['tools'] ?? [], self::MCP_TOOL_ABILITIES ) ) );
+		return $config;
 	}
 
 	public static function register_category(): void {
@@ -31,6 +50,11 @@ class CloseHub_Content_Abilities {
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
 		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
 		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
+		self::ability( 'closehub/upload-media', 'Upload image', 'Upload one image to the Media Library. Use its returned URL as featured_image_url when creating or updating content.', [ self::class, 'upload_media' ], [ self::class, 'can_upload_media' ], false, false, [
+			'filename'    => [ 'type' => 'string' ],
+			'data_base64' => [ 'type' => 'string' ],
+			'alt_text'    => [ 'type' => 'string' ],
+		], [ 'filename', 'data_base64' ] );
 		self::ability( 'closehub/update-post-slug', 'Update post slug', 'Update the URL slug of one post, page, product, or other supported content item. WordPress normalizes the slug and adds a suffix when needed to keep it unique.', [ self::class, 'update_post_slug' ], [ self::class, 'can_edit_post' ], false, true, [
 			'post_id' => [ 'type' => 'integer' ],
 			'slug'    => [ 'type' => 'string' ],
@@ -69,6 +93,7 @@ class CloseHub_Content_Abilities {
 	}
 	public static function can_delete_post( $input ): bool { return current_user_can( 'delete_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_manage_woocommerce(): bool { return current_user_can( 'manage_woocommerce' ); }
+	public static function can_upload_media(): bool { return current_user_can( 'upload_files' ); }
 
 	/** Check a post type's own meta capability (e.g. 'publish_products' for a product) instead of assuming 'post'. */
 	private static function type_cap( string $post_type, string $cap ): bool {
@@ -121,6 +146,81 @@ class CloseHub_Content_Abilities {
 		$request = self::request( 'PUT', '/closehub/v1/posts/' . $post_id, $input );
 		$request->set_param( 'id', $post_id );
 		return ( new CloseHub_REST_API() )->update_post_for_mcp( $request, fn() => self::can_edit_post( $input ) );
+	}
+
+	/** Upload one allowed image from a base64 payload into the Media Library. */
+	public static function upload_media( $input ): array|WP_Error {
+		$input = is_array( $input ) ? $input : [];
+
+		if ( ! isset( $input['filename'] ) || ! is_string( $input['filename'] ) || '' === $input['filename'] ) {
+			return new WP_Error( 'closehub_missing_filename', 'filename is required.' );
+		}
+		if ( ! isset( $input['data_base64'] ) || ! is_string( $input['data_base64'] ) || '' === $input['data_base64'] ) {
+			return new WP_Error( 'closehub_missing_data_base64', 'data_base64 is required.' );
+		}
+
+		$filename = sanitize_file_name( $input['filename'] );
+		if ( '' === $filename ) {
+			return new WP_Error( 'closehub_invalid_filename', 'filename must contain a valid file name.' );
+		}
+
+		$contents = base64_decode( $input['data_base64'], true );
+		if ( false === $contents || '' === $contents ) {
+			return new WP_Error( 'closehub_invalid_data_base64', 'data_base64 must be valid, non-empty base64 data.' );
+		}
+		$max_size = wp_max_upload_size();
+		if ( $max_size > 0 && strlen( $contents ) > $max_size ) {
+			return new WP_Error( 'closehub_invalid_data_base64', 'The decoded image exceeds this site\'s maximum upload size.' );
+		}
+
+		$allowed_mimes = get_allowed_mime_types();
+		$filetype      = wp_check_filetype( $filename, $allowed_mimes );
+		if ( empty( $filetype['type'] ) || ! str_starts_with( $filetype['type'], 'image/' ) ) {
+			return new WP_Error( 'closehub_invalid_media_type', 'Only image files allowed by this site may be uploaded.' );
+		}
+
+		$upload = wp_upload_bits( $filename, null, $contents );
+		if ( ! empty( $upload['error'] ) ) {
+			return new WP_Error( 'closehub_media_upload_failed', $upload['error'] );
+		}
+
+		$image_mime = wp_get_image_mime( $upload['file'] );
+		if ( ! $image_mime || ! in_array( $image_mime, $allowed_mimes, true ) ) {
+			wp_delete_file( $upload['file'] );
+			return new WP_Error( 'closehub_invalid_media_type', 'The uploaded file is not a permitted image.' );
+		}
+
+		if ( ! function_exists( 'wp_generate_attachment_metadata' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/image.php';
+		}
+		$attachment_id = wp_insert_attachment( [
+			'post_mime_type' => $image_mime,
+			'post_title'     => sanitize_text_field( pathinfo( $filename, PATHINFO_FILENAME ) ),
+			'post_status'    => 'inherit',
+		], $upload['file'], 0, true );
+		if ( is_wp_error( $attachment_id ) ) {
+			wp_delete_file( $upload['file'] );
+			return $attachment_id;
+		}
+
+		$metadata = wp_generate_attachment_metadata( $attachment_id, $upload['file'] );
+		if ( is_wp_error( $metadata ) || ! is_array( $metadata ) ) {
+			wp_delete_attachment( $attachment_id, true );
+			return is_wp_error( $metadata )
+				? $metadata
+				: new WP_Error( 'closehub_media_upload_failed', 'The image metadata could not be generated.' );
+		}
+		wp_update_attachment_metadata( $attachment_id, $metadata );
+
+		if ( isset( $input['alt_text'] ) && is_string( $input['alt_text'] ) && '' !== $input['alt_text'] ) {
+			update_post_meta( $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( $input['alt_text'] ) );
+		}
+
+		return [
+			'attachment_id' => $attachment_id,
+			'url'           => wp_get_attachment_url( $attachment_id ),
+			'mime_type'     => $image_mime,
+		];
 	}
 
 	/** Update only a post's permalink slug through WordPress's normal unique-slug handling. */

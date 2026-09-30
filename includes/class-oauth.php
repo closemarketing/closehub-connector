@@ -408,8 +408,9 @@ class CloseHub_OAuth {
 		$metadata = self::client_metadata_document( $id );
 		if ( ! $metadata ) { return null; }
 		$name = sanitize_text_field( (string) ( $metadata['client_name'] ?? '' ) );
+		if ( '' === $name ) { $name = self::client_display_name( $id ); }
 		$uris = $metadata['redirect_uris'] ?? [];
-		if ( '' === $name || ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return null; }
+		if ( ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return null; }
 		foreach ( $uris as $uri ) { if ( ! is_string( $uri ) ) { return null; } }
 		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
 		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return null; } }
@@ -423,13 +424,21 @@ class CloseHub_OAuth {
 			$cached = get_transient( $key );
 			if ( is_array( $cached ) ) { return $cached; }
 		}
-		if ( ! self::throttle_client_metadata() ) { return null; }
-		$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
-		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
-		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
-		if ( $use_cache ) { set_transient( $key, $metadata, self::CLIENT_METADATA_CACHE_TTL ); }
-		return $metadata;
+		if ( ! self::throttle_client_metadata() || ! self::reserve_client_metadata_fetch() ) { return null; }
+		try {
+			$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
+			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
+			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
+			if ( $use_cache ) { set_transient( $key, $metadata, self::CLIENT_METADATA_CACHE_TTL ); }
+			return $metadata;
+		} finally {
+			self::release_client_metadata_fetch();
+		}
+	}
+	private static function client_display_name( string $id ): string {
+		$host = sanitize_text_field( (string) wp_parse_url( $id, PHP_URL_HOST ) );
+		return '' !== $host ? $host : 'OAuth client';
 	}
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
@@ -514,6 +523,33 @@ class CloseHub_OAuth {
 		}
 		set_transient( $key, $count + 1, HOUR_IN_SECONDS );
 		return true;
+	}
+
+	/**
+	 * Reserve the one outbound CIMD request allowed per IP at a time.
+	 * add_option() is backed by a unique option_name index, making this an
+	 * atomic reservation even without a persistent object cache.
+	 */
+	private static function reserve_client_metadata_fetch(): bool {
+		$key = self::client_metadata_lock_key();
+		if ( add_option( $key, time(), '', false ) ) {
+			return true;
+		}
+		// A worker can die mid-request. The remote timeout is ten seconds, so a
+		// fifteen-second stale lock can safely be reclaimed.
+		if ( (int) get_option( $key, 0 ) >= time() - 15 ) {
+			return false;
+		}
+		delete_option( $key );
+		return add_option( $key, time(), '', false );
+	}
+
+	private static function release_client_metadata_fetch(): void {
+		delete_option( self::client_metadata_lock_key() );
+	}
+
+	private static function client_metadata_lock_key(): string {
+		return 'closehub_oauth_cimd_lock_' . md5( (string) ( $_SERVER['REMOTE_ADDR'] ?? '' ) );
 	}
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }

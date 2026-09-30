@@ -5,6 +5,8 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ . '/' );
 define( 'HOUR_IN_SECONDS', 3600 );
 
+$GLOBALS['closehub_test_options'] = [];
+
 class WP_REST_Server { const READABLE = 'GET'; const CREATABLE = 'POST'; }
 class WP_REST_Response {
 	private array $headers = [];
@@ -43,6 +45,11 @@ function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, 
 function update_option( string $option, $value, bool $autoload = true ): bool { $GLOBALS['closehub_test_options'][ $option ] = $value; return true; }
 function get_option( string $option, $default = false ) { return $GLOBALS['closehub_test_options'][ $option ] ?? $default; }
 function delete_option( string $option ): bool { unset( $GLOBALS['closehub_test_options'][ $option ] ); return true; }
+function add_option( string $option, $value = '', string $deprecated = '', $autoload = null ): bool {
+	if ( array_key_exists( $option, $GLOBALS['closehub_test_options'] ) ) { return false; }
+	$GLOBALS['closehub_test_options'][ $option ] = $value;
+	return true;
+}
 function get_transient( string $key ) { return $GLOBALS['closehub_test_transients'][ $key ] ?? false; }
 function set_transient( string $key, $value, int $expiration ): bool { $GLOBALS['closehub_test_transients'][ $key ] = $value; return true; }
 function is_wp_error( $thing ): bool { return false; }
@@ -160,6 +167,33 @@ $long_client = $valid_authorize->invoke( null, [
 ] );
 closehub_test_assert( $long_client instanceof WP_Error && 'invalid_client' === $long_client->get_error_code(), 'Client IDs longer than the database column must be rejected before authorization.' );
 closehub_test_assert( empty( $GLOBALS['closehub_test_remote_calls'][ $long_client_id ] ), 'An overlong client ID must not trigger a metadata request.' );
+
+$anonymous_client_id = 'https://anonymous.example/client-metadata.json';
+$GLOBALS['closehub_test_client_metadata'][ $anonymous_client_id ] = [
+	'response' => [ 'code' => 200 ],
+	'headers' => [],
+	'body' => wp_json_encode( [
+		'client_id' => $anonymous_client_id,
+		'redirect_uris' => [ 'https://anonymous.example/callback' ],
+	] ),
+];
+$anonymous_client = $valid_authorize->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $anonymous_client_id,
+	'redirect_uri' => 'https://anonymous.example/callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( is_array( $anonymous_client ) && 'anonymous.example' === $anonymous_client['client_name'], 'Hosted metadata without an optional client_name must use its host as a safe display name.' );
+
+$reserve_metadata_fetch = new ReflectionMethod( CloseHub_OAuth::class, 'reserve_client_metadata_fetch' );
+$reserve_metadata_fetch->setAccessible( true );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+closehub_test_assert( true === $reserve_metadata_fetch->invoke( null ), 'The first metadata fetch for an IP must reserve the outbound request slot.' );
+closehub_test_assert( false === $reserve_metadata_fetch->invoke( null ), 'A concurrent metadata fetch for the same IP must not start another remote request.' );
+unset( $_SERVER['REMOTE_ADDR'] );
+$GLOBALS['closehub_test_options'] = [];
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of

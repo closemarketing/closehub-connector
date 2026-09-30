@@ -21,9 +21,11 @@ class WP_REST_Response {
 }
 class WP_REST_Request { public function get_route(): string { return ''; } public function get_param( string $key ) { return null; } }
 class CloseHub_Preview_Ability {
-	public function __construct( private string $label, private string $description ) {}
+	public function __construct( private string $name, private string $label, private string $description ) {}
+	public function get_name(): string { return $this->name; }
 	public function get_label(): string { return $this->label; }
 	public function get_description(): string { return $this->description; }
+	public function get_meta(): array { return [ 'mcp' => [ 'public' => true ] ]; }
 }
 
 function add_action( ...$args ): void {}
@@ -43,11 +45,11 @@ function wp_nonce_field( string $action, string $name ): void { echo '<input typ
 function plugins_url( string $path, string $plugin ): string { return '/' . ltrim( $path, '/' ); }
 function wp_get_abilities( array $args = [] ): array {
 	return [
-		'closehub/list-posts'        => new CloseHub_Preview_Ability( 'List posts', 'List or search WordPress content.' ),
-		'closehub/create-post'       => new CloseHub_Preview_Ability( 'Create post', 'Create draft content for review or publication.' ),
-		'closehub/update-post'       => new CloseHub_Preview_Ability( 'Update post', 'Update existing WordPress content.' ),
-		'closehub/get-order-summary' => new CloseHub_Preview_Ability( 'Get order summary', 'Read WooCommerce sales information.' ),
-		'closehub/clear-cache'       => new CloseHub_Preview_Ability( 'Clear site cache', 'Purge the page cache of the active caching plugin.' ),
+		'closehub/list-posts'        => new CloseHub_Preview_Ability( 'closehub/list-posts', 'List posts', 'List or search WordPress content.' ),
+		'closehub/create-post'       => new CloseHub_Preview_Ability( 'closehub/create-post', 'Create post', 'Create draft content for review or publication.' ),
+		'closehub/update-post'       => new CloseHub_Preview_Ability( 'closehub/update-post', 'Update post', 'Update existing WordPress content.' ),
+		'closehub/get-order-summary' => new CloseHub_Preview_Ability( 'closehub/get-order-summary', 'Get order summary', 'Read WooCommerce sales information.' ),
+		'closehub/clear-cache'       => new CloseHub_Preview_Ability( 'closehub/clear-cache', 'Clear site cache', 'Purge the page cache of the active caching plugin.' ),
 	];
 }
 

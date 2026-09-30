@@ -213,7 +213,9 @@ class CloseHub_OAuth {
 	private static function maybe_upgrade(): void {
 		if ( self::DB_VERSION !== get_option( 'closehub_oauth_db_version' ) ) {
 			self::install();
-			self::refresh_well_known_files_after_upgrade();
+			// init() is called on plugins_loaded, before rest_url() can safely
+			// inspect the rewrite object. Run the actual metadata refresh on init.
+			add_action( 'init', [ self::class, 'refresh_well_known_files_after_upgrade' ], 0 );
 		}
 	}
 

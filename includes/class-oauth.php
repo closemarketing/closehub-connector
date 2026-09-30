@@ -220,7 +220,7 @@ class CloseHub_OAuth {
 	}
 
 	/** Refresh persisted discovery metadata after a metadata schema upgrade. */
-	private static function refresh_well_known_files_after_upgrade(): void {
+	public static function refresh_well_known_files_after_upgrade(): void {
 		if ( is_multisite() && ! is_main_site() ) {
 			return;
 		}

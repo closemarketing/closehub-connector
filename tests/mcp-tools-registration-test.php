@@ -31,6 +31,7 @@ $expected = [
 	'closehub/get-post',
 	'closehub/create-post',
 	'closehub/update-post',
+	'closehub/upload-media',
 	'closehub/update-post-slug',
 	'closehub/replace-gutenberg-block',
 	'closehub/trash-post',

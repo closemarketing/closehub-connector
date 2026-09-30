@@ -153,30 +153,30 @@ class CloseHub_Content_Abilities {
 		$input = is_array( $input ) ? $input : [];
 
 		if ( ! isset( $input['filename'] ) || ! is_string( $input['filename'] ) || '' === $input['filename'] ) {
-			return new WP_Error( 'closehub_missing_filename', 'filename is required.' );
+			return new WP_Error( 'closehub_missing_filename', 'filename is required.', [ 'status' => 400 ] );
 		}
 		if ( ! isset( $input['data_base64'] ) || ! is_string( $input['data_base64'] ) || '' === $input['data_base64'] ) {
-			return new WP_Error( 'closehub_missing_data_base64', 'data_base64 is required.' );
+			return new WP_Error( 'closehub_missing_data_base64', 'data_base64 is required.', [ 'status' => 400 ] );
 		}
 
 		$filename = sanitize_file_name( $input['filename'] );
 		if ( '' === $filename ) {
-			return new WP_Error( 'closehub_invalid_filename', 'filename must contain a valid file name.' );
+			return new WP_Error( 'closehub_invalid_filename', 'filename must contain a valid file name.', [ 'status' => 400 ] );
 		}
 
 		$contents = base64_decode( $input['data_base64'], true );
 		if ( false === $contents || '' === $contents ) {
-			return new WP_Error( 'closehub_invalid_data_base64', 'data_base64 must be valid, non-empty base64 data.' );
+			return new WP_Error( 'closehub_invalid_data_base64', 'data_base64 must be valid, non-empty base64 data.', [ 'status' => 400 ] );
 		}
 		$max_size = wp_max_upload_size();
-		if ( $max_size > 0 && strlen( $contents ) > $max_size ) {
-			return new WP_Error( 'closehub_invalid_data_base64', 'The decoded image exceeds this site\'s maximum upload size.' );
+		if ( $max_size <= 0 || strlen( $contents ) > $max_size ) {
+			return new WP_Error( 'closehub_invalid_data_base64', 'The decoded image exceeds this site\'s maximum upload size.', [ 'status' => 413 ] );
 		}
 
 		$allowed_mimes = get_allowed_mime_types();
 		$filetype      = wp_check_filetype( $filename, $allowed_mimes );
 		if ( empty( $filetype['type'] ) || ! str_starts_with( $filetype['type'], 'image/' ) ) {
-			return new WP_Error( 'closehub_invalid_media_type', 'Only image files allowed by this site may be uploaded.' );
+			return new WP_Error( 'closehub_invalid_media_type', 'Only image files allowed by this site may be uploaded.', [ 'status' => 400 ] );
 		}
 
 		$upload = wp_upload_bits( $filename, null, $contents );
@@ -185,9 +185,9 @@ class CloseHub_Content_Abilities {
 		}
 
 		$image_mime = wp_get_image_mime( $upload['file'] );
-		if ( ! $image_mime || ! in_array( $image_mime, $allowed_mimes, true ) ) {
+		if ( ! $image_mime || ! in_array( $image_mime, $allowed_mimes, true ) || $image_mime !== $filetype['type'] ) {
 			wp_delete_file( $upload['file'] );
-			return new WP_Error( 'closehub_invalid_media_type', 'The uploaded file is not a permitted image.' );
+			return new WP_Error( 'closehub_invalid_media_type', 'The uploaded file is not a permitted image or does not match its filename.', [ 'status' => 400 ] );
 		}
 
 		if ( ! function_exists( 'wp_generate_attachment_metadata' ) ) {
@@ -205,12 +205,19 @@ class CloseHub_Content_Abilities {
 
 		$metadata = wp_generate_attachment_metadata( $attachment_id, $upload['file'] );
 		if ( is_wp_error( $metadata ) || ! is_array( $metadata ) ) {
-			wp_delete_attachment( $attachment_id, true );
+			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+				return new WP_Error( 'closehub_media_cleanup_failed', 'The image metadata could not be generated and the incomplete attachment could not be removed. Manual cleanup is required.', [ 'status' => 500 ] );
+			}
 			return is_wp_error( $metadata )
 				? $metadata
-				: new WP_Error( 'closehub_media_upload_failed', 'The image metadata could not be generated.' );
+				: new WP_Error( 'closehub_media_upload_failed', 'The image metadata could not be generated.', [ 'status' => 500 ] );
 		}
-		wp_update_attachment_metadata( $attachment_id, $metadata );
+		if ( ! wp_update_attachment_metadata( $attachment_id, $metadata ) && wp_get_attachment_metadata( $attachment_id ) !== $metadata ) {
+			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+				return new WP_Error( 'closehub_media_cleanup_failed', 'The image metadata could not be saved and the incomplete attachment could not be removed. Manual cleanup is required.', [ 'status' => 500 ] );
+			}
+			return new WP_Error( 'closehub_media_upload_failed', 'The image metadata could not be saved.', [ 'status' => 500 ] );
+		}
 
 		if ( isset( $input['alt_text'] ) && is_string( $input['alt_text'] ) && '' !== $input['alt_text'] ) {
 			update_post_meta( $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( $input['alt_text'] ) );

@@ -574,7 +574,7 @@ class CloseHub_REST_API {
 			// Library attachment. Reuse it instead of downloading a duplicate.
 			$attachment_id = attachment_url_to_postid( $featured_image_url );
 			if ( $attachment_id && 'attachment' === get_post_type( $attachment_id ) ) {
-				if ( ! set_post_thumbnail( $post_id, $attachment_id ) ) {
+				if ( (int) get_post_thumbnail_id( $post_id ) !== (int) $attachment_id && ! set_post_thumbnail( $post_id, $attachment_id ) ) {
 					return new WP_Error( 'closehub_featured_image_failed', 'The featured image could not be assigned to the post.' );
 				}
 				return true;

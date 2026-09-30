@@ -38,6 +38,7 @@ function esc_html_e( string $text ): void { echo htmlspecialchars( $text, ENT_QU
 function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( string $url ): string { return $url; }
+function language_attributes(): void { echo 'lang="en-US"'; }
 function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="preview">'; }
 function plugins_url( string $path, string $plugin ): string { return '/' . ltrim( $path, '/' ); }
 function wp_get_abilities( array $args = [] ): array {

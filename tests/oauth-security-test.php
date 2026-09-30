@@ -45,6 +45,7 @@ function esc_html_e( string $text ): void { echo htmlspecialchars( $text, ENT_QU
 function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( string $url ): string { return $url; }
+function language_attributes(): void { echo 'lang="en-US"'; }
 function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $action ) . '">'; }
 function plugins_url( string $path, string $plugin ): string { return 'https://example.test/wp-content/plugins/closehub-connector/' . ltrim( $path, '/' ); }
 function wp_get_abilities( array $args = [] ): array { return $GLOBALS['closehub_test_abilities'] ?? []; }
@@ -141,7 +142,7 @@ $consent_response = $consent_page->invoke( null, [ 'client_name' => 'Claude' ], 
 ] );
 $consent_html = $consent_response->get_data();
 closehub_test_assert( false !== strpos( $consent_html, 'assets/logo-closehub.svg' ), 'The consent page must display the bundled CloseHub logo.' );
-closehub_test_assert( false !== strpos( $consent_html, 'Habilidades autorizadas' ), 'The consent page must explain the authorized abilities.' );
+closehub_test_assert( false !== strpos( $consent_html, 'Authorized abilities' ), 'The consent page must explain the authorized abilities in its English source language.' );
 closehub_test_assert( false !== strpos( $consent_html, 'List posts' ) && false !== strpos( $consent_html, 'Update post' ), 'The consent page must list registered CloseHub MCP abilities.' );
 closehub_test_assert( strpos( $consent_html, 'List posts' ) < strpos( $consent_html, 'Update post' ), 'The consent page must sort abilities by their label.' );
 closehub_test_assert( false === strpos( $consent_html, 'List or search WordPress content.' ), 'The consent page must keep every ability to a single compact row.' );

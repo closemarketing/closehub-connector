@@ -33,6 +33,7 @@ function absint( $value ): int { return abs( (int) $value ); }
 function is_object_in_taxonomy( string $object_type, string $taxonomy ): bool { return 'category' === $taxonomy && 'product' !== $object_type; }
 function get_post( int $id ): WP_Post { return new WP_Post( $GLOBALS['closehub_test_post_type'] ); }
 
+require_once dirname( __DIR__ ) . '/includes/class-wpml.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 
 $post = CloseHub_Content_Abilities::create_post( [ 'title' => 'Test', 'content' => '<p>Test</p>' ] );

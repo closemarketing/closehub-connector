@@ -4,6 +4,7 @@ declare( strict_types=1 );
 
 define( 'ABSPATH', __DIR__ . '/' );
 define( 'HOUR_IN_SECONDS', 3600 );
+define( 'CLOSEHUB_PLUGIN_FILE', dirname( __DIR__ ) . '/closehub-connector.php' );
 
 $GLOBALS['closehub_test_options'] = [];
 
@@ -27,6 +28,13 @@ class WP_REST_Request {
 	public function set_param( string $key, $value ): void { $this->params[ $key ] = $value; }
 	public function get_param( string $key ) { return $this->params[ $key ] ?? null; }
 }
+class CloseHub_Test_Ability {
+	public function __construct( private string $name, private string $label, private string $description, private array $meta = [ 'mcp' => [ 'public' => true ] ] ) {}
+	public function get_name(): string { return $this->name; }
+	public function get_label(): string { return $this->label; }
+	public function get_description(): string { return $this->description; }
+	public function get_meta(): array { return $this->meta; }
+}
 
 function add_action( ...$args ): void {}
 function add_filter( ...$args ): void {}
@@ -36,6 +44,14 @@ function wp_parse_url( string $url, ?int $component = null ) { return parse_url(
 function rest_get_url_prefix(): string { return 'wp-json'; }
 function sanitize_text_field( string $value ): string { return $value; }
 function esc_url_raw( string $value ): string { return $value; }
+function esc_html_e( string $text ): void { echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_url( string $url ): string { return $url; }
+function language_attributes(): void { echo 'lang="en-US"'; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $action ) . '">'; }
+function plugins_url( string $path, string $plugin ): string { return 'https://example.test/wp-content/plugins/closehub-connector/' . ltrim( $path, '/' ); }
+function wp_get_abilities(): array { return $GLOBALS['closehub_test_abilities'] ?? []; }
 function current_time( string $type, bool $gmt = false ): string { return '2026-09-23 09:00:00'; }
 function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir( $target, 0755, true ); }
 function get_home_path(): string { return $GLOBALS['closehub_test_home_path']; }
@@ -116,6 +132,34 @@ closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://localhost:1234
 closehub_test_assert( CloseHub_OAuth::valid_redirect_uri( 'http://127.0.0.1/callback' ), 'An http://127.0.0.1 redirect URI must be valid.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'http://attacker.example/callback' ), 'A plain-http non-localhost redirect URI must be rejected.' );
 closehub_test_assert( ! CloseHub_OAuth::valid_redirect_uri( 'javascript:alert(1)' ), 'A javascript: redirect URI must be rejected.' );
+
+// ── consent page branding and ability disclosure ────────────────────────────
+
+$GLOBALS['closehub_test_abilities'] = [
+	'closehub/update-post' => new CloseHub_Test_Ability( 'closehub/update-post', 'Update post', 'Update existing WordPress content.' ),
+	'closehub/list-posts'  => new CloseHub_Test_Ability( 'closehub/list-posts', 'List posts', 'List or search WordPress content.' ),
+	'other/private'        => new CloseHub_Test_Ability( 'other/private', 'Private ability', 'Must not be disclosed.' ),
+	'other/public'         => new CloseHub_Test_Ability( 'other/public', 'Other public ability', 'Must not be disclosed.' ),
+	'closehub/private'     => new CloseHub_Test_Ability( 'closehub/private', 'Private CloseHub ability', 'Must not be disclosed.', [ 'mcp' => [ 'public' => false ] ] ),
+];
+$consent_page = new ReflectionMethod( CloseHub_OAuth::class, 'consent_page' );
+$consent_page->setAccessible( true );
+$consent_response = $consent_page->invoke( null, [ 'client_name' => 'Claude' ], [
+	'response_type' => 'code',
+	'client_id' => 'chc_test',
+	'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+$consent_html = $consent_response->get_data();
+closehub_test_assert( false !== strpos( $consent_html, 'assets/logo-closehub.svg' ), 'The consent page must display the bundled CloseHub logo.' );
+closehub_test_assert( false !== strpos( $consent_html, 'Authorized abilities' ), 'The consent page must explain the authorized abilities in its English source language.' );
+closehub_test_assert( false !== strpos( $consent_html, 'List posts' ) && false !== strpos( $consent_html, 'Update post' ), 'The consent page must list public CloseHub MCP abilities.' );
+closehub_test_assert( false === strpos( $consent_html, 'Private ability' ) && false === strpos( $consent_html, 'Other public ability' ) && false === strpos( $consent_html, 'Private CloseHub ability' ), 'The consent page must not disclose non-CloseHub or non-public abilities.' );
+closehub_test_assert( strpos( $consent_html, 'List posts' ) < strpos( $consent_html, 'Update post' ), 'The consent page must sort abilities by their label.' );
+closehub_test_assert( false === strpos( $consent_html, 'List or search WordPress content.' ), 'The consent page must keep every ability to a single compact row.' );
+unset( $GLOBALS['closehub_test_abilities'] );
 
 // ── Client ID Metadata Documents (CIMD) ─────────────────────────────────────
 

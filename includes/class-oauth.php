@@ -453,8 +453,13 @@ class CloseHub_OAuth {
 	 * this method exiting mid-request.
 	 */
 	private static function consent_page( array $client, array $p ): WP_REST_Response {
+		$abilities = self::consent_abilities();
 		ob_start();
-		?><!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></title><style>body{font:16px system-ui;background:#f0f0f1;color:#1d2327;margin:0;display:grid;place-items:center;min-height:100vh}.card{background:#fff;padding:32px;border-radius:8px;max-width:480px;box-shadow:0 1px 3px #0002}button{padding:10px 16px;margin-right:8px}</style></head><body><main class="card"><h1><?php esc_html_e( 'Authorize MCP client', 'closehub-connector' ); ?></h1><p><?php printf( esc_html__( '%s requests access to this WordPress site.', 'closehub-connector' ), esc_html( $client['client_name'] ) ); ?></p><p><?php esc_html_e( 'It will act with the permissions of your current WordPress account.', 'closehub-connector' ); ?></p><form method="post" action="<?php echo esc_url( rest_url( self::NS . '/authorize' ) ); ?>"><?php wp_nonce_field( 'closehub_oauth_authorize', 'closehub_oauth_nonce' ); foreach ( $p as $key => $value ) : ?><input type="hidden" name="<?php echo esc_attr( $key === 'challenge' ? 'code_challenge' : ( $key === 'method' ? 'code_challenge_method' : $key ) ); ?>" value="<?php echo esc_attr( $value ); ?>"><?php endforeach; ?><button name="decision" value="approve"><?php esc_html_e( 'Authorize', 'closehub-connector' ); ?></button><button name="decision" value="deny"><?php esc_html_e( 'Deny', 'closehub-connector' ); ?></button></form></main></body></html><?php
+		?>
+		<!doctype html>
+		<html <?php language_attributes(); ?>><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title><?php esc_html_e( 'Authorize CloseHub', 'closehub-connector' ); ?></title><style>:root{color:#16164a;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{background:linear-gradient(135deg,#f5f6ff,#f8fafc 48%,#eef1ff);margin:0;min-height:100vh;padding:32px 16px;display:grid;place-items:center}.card{background:#fff;border:1px solid #e6e8f2;border-radius:20px;box-shadow:0 24px 60px #16164a1a;max-width:680px;padding:32px;width:100%}.closehub-logo{display:block;height:auto;margin:0 0 24px;width:176px}h1{font-size:28px;letter-spacing:-.03em;line-height:1.2;margin:0 0 8px}.lead{color:#4b556b;font-size:16px;line-height:1.55;margin:0}.client{align-items:center;background:#f7f8ff;border:1px solid #e1e4ff;border-radius:12px;display:flex;gap:12px;margin:18px 0;padding:12px 14px}.client-mark{align-items:center;background:#1838d8;border-radius:8px;color:#fff;display:flex;font-weight:700;height:32px;justify-content:center;width:32px}.client strong{display:block}.client span{color:#667085;font-size:13px}.permissions{border-top:1px solid #eaecf0;margin-top:20px;padding-top:20px}.permissions h2{font-size:17px;margin:0 0 4px}.permissions>p{color:#667085;font-size:14px;line-height:1.5;margin:0 0 12px}.ability-list{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr));list-style:none;margin:0;padding:0}.ability-list li{align-items:center;background:#fafbff;border:1px solid #eaecf7;border-radius:10px;display:flex;gap:8px;min-width:0;padding:10px}.ability-list svg{color:#1838d8;flex:none;height:16px;width:16px}.ability-list strong{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.notice{background:#fffbeb;border:1px solid #fef0c7;border-radius:10px;color:#854d0e;font-size:13px;line-height:1.45;margin:16px 0 0;padding:10px 12px}.actions{display:flex;gap:12px;margin-top:22px}.button{border:0;border-radius:9px;cursor:pointer;font:inherit;font-weight:650;padding:11px 18px}.button-primary{background:#1838d8;color:#fff}.button-secondary{background:#fff;border:1px solid #d0d5dd;color:#344054}@media(max-width:520px){body{padding:16px}.card{border-radius:16px;padding:24px 20px}.closehub-logo{margin-bottom:20px;width:152px}h1{font-size:25px}.ability-list{grid-template-columns:1fr}.actions{flex-direction:column}.button{width:100%}}</style></head>
+		<body><main class="card"><img class="closehub-logo" src="<?php echo esc_url( plugins_url( 'assets/logo-closehub.svg', CLOSEHUB_PLUGIN_FILE ) ); ?>" alt="CloseHub"><h1><?php esc_html_e( 'Connect CloseHub to your site', 'closehub-connector' ); ?></h1><p class="lead"><?php esc_html_e( 'Review the access you are about to grant before continuing.', 'closehub-connector' ); ?></p><div class="client"><div class="client-mark" aria-hidden="true">M</div><div><strong><?php echo esc_html( $client['client_name'] ); ?></strong><span><?php esc_html_e( 'MCP client', 'closehub-connector' ); ?></span></div></div><section class="permissions" aria-labelledby="closehub-abilities"><h2 id="closehub-abilities"><?php esc_html_e( 'Authorized abilities', 'closehub-connector' ); ?></h2><p><?php esc_html_e( 'This client may request these actions. Each one will respect your WordPress account permissions.', 'closehub-connector' ); ?></p><?php if ( $abilities ) : ?><ul class="ability-list"><?php foreach ( $abilities as $ability ) : ?><li><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg><strong><?php echo esc_html( $ability['label'] ); ?></strong></li><?php endforeach; ?></ul><?php else : ?><p><?php esc_html_e( 'Available abilities will be determined by your account permissions.', 'closehub-connector' ); ?></p><?php endif; ?></section><p class="notice"><?php esc_html_e( 'By authorizing, CloseHub will act with the permissions of the WordPress account you are signed in with.', 'closehub-connector' ); ?></p><form method="post" action="<?php echo esc_url( rest_url( self::NS . '/authorize' ) ); ?>"><?php wp_nonce_field( 'closehub_oauth_authorize', 'closehub_oauth_nonce' ); foreach ( $p as $key => $value ) : ?><input type="hidden" name="<?php echo esc_attr( $key === 'challenge' ? 'code_challenge' : ( $key === 'method' ? 'code_challenge_method' : $key ) ); ?>" value="<?php echo esc_attr( $value ); ?>"><?php endforeach; ?><div class="actions"><button class="button button-primary" name="decision" value="approve"><?php esc_html_e( 'Authorize access', 'closehub-connector' ); ?></button><button class="button button-secondary" name="decision" value="deny"><?php esc_html_e( 'Cancel', 'closehub-connector' ); ?></button></div></form></main></body></html>
+		<?php
 		$html = (string) ob_get_clean();
 
 		$response = new WP_REST_Response( $html, 200 );
@@ -465,6 +470,35 @@ class CloseHub_OAuth {
 		$response->header( 'Content-Security-Policy', "frame-ancestors 'none'" );
 
 		return $response;
+	}
+
+	/** Return the CloseHub abilities currently exposed as MCP tools. */
+	private static function consent_abilities(): array {
+		if ( ! function_exists( 'wp_get_abilities' ) ) {
+			return [];
+		}
+
+		$abilities = wp_get_abilities();
+		$items = [];
+		foreach ( $abilities as $ability ) {
+			if ( ! is_object( $ability ) || ! method_exists( $ability, 'get_name' ) || ! method_exists( $ability, 'get_label' ) || ! method_exists( $ability, 'get_description' ) || ! method_exists( $ability, 'get_meta' ) ) {
+				continue;
+			}
+			if ( ! str_starts_with( (string) $ability->get_name(), 'closehub/' ) ) {
+				continue;
+			}
+			$meta = $ability->get_meta();
+			if ( ! is_array( $meta ) || true !== ( $meta['mcp']['public'] ?? false ) ) {
+				continue;
+			}
+			$items[] = [
+				'label'       => (string) $ability->get_label(),
+				'description' => (string) $ability->get_description(),
+			];
+		}
+
+		usort( $items, static fn( array $left, array $right ): int => strcasecmp( $left['label'], $right['label'] ) );
+		return $items;
 	}
 	/**
 	 * Whether this request targets the MCP endpoint, not just any REST route

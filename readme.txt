@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.1.2
-Version: 1.1.2
+Stable tag: 1.1.3
+Version: 1.1.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,6 +36,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/list-unused-plugins` (`activate_plugins`, read-only) — List installed plugins that are not currently active, as removal candidates. Takes no parameters.
 * `closehub/update-plugins-and-core` (`update_plugins` and `update_core`) — Update every plugin with an available update and WordPress core to the latest version, with a per-plugin success result. Takes no parameters.
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
+* `closehub/clear-cache` (`rocket_purge_cache` or `manage_options`) — Purge the page cache of the active caching plugin (currently WP Rocket). `scope` is `all` (default, whole site) or `posts` (only the given `post_ids`; IDs that don't match a post are reported back in `invalid_post_ids`). Pass `minify: true` to also clear minified CSS/JS files. Returns `503` when no supported cache plugin is active. On multisite it purges only the site the MCP request is made against; on a subdirectory network, purging the main site with WP Rocket also clears the subsites' cached pages, since they live inside the main site's cache folder. Example: `{ "scope": "posts", "post_ids": [ 42, 57 ] }`.
 
 **What it replaces:**
 
@@ -57,8 +58,10 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
 * `GET /closehub/v1/gravity-forms/forms/{id}/entries` — count form entries by date range
+* `POST /closehub/v1/elm-releases` — create an Easy License Manager release for a product (by `product_id` or `product_sku`) and update its WooCommerce download file to the given `zip_url` in one call; optional `tested`, `requires`, `requires_php`, `upgrade_notice`
+* `PUT /closehub/v1/elm-releases/{id}` — update fields on an existing release (all optional) and, if `zip_url` is given, its product's download file
 
-WooCommerce and Gravity Forms endpoints return a clear error if those plugins are not active — they are not required.
+WooCommerce, Gravity Forms, and Easy License Manager endpoints return a clear error if those plugins are not active — they are not required.
 
 **Multisite networks:**
 
@@ -108,6 +111,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 = Unreleased =
 * Fixed CloseHub content and site abilities not being exposed as direct tools by the default MCP server.
 * Fixed Claude and other hosted MCP clients that identify themselves with a Client ID Metadata Document: OAuth authorization now validates that document directly when no prior dynamic registration exists, and advertises that capability in the authorization-server metadata. Re-registering the same verified client is idempotent and refreshes its stored metadata instead of failing on a duplicate client ID. (#34)
+* Added `POST /closehub/v1/elm-releases` to create an Easy License Manager release and update the product's WooCommerce download file in one call, unblocking automated premium-plugin releases. Accepts optional `tested`, `requires`, `requires_php`, and `upgrade_notice`. Preserves any other downloadable files already on the product instead of replacing them. Returns `503` if Easy License Manager is not active. (#19)
+* Added `PUT /closehub/v1/elm-releases/{id}` to update fields on an existing release (and its product's download file) without creating a duplicate release for the same version.
+* Fixed a crash on PHP 8+ when a route's numeric `id`/`product_id` argument was validated: `is_numeric` was registered directly as `validate_callback`, but WordPress calls it with 3 arguments and the internal function only accepts 1. Affected `/posts/{id}`, `/gravity-forms/forms/{id}`, and both new `elm-releases` routes.
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

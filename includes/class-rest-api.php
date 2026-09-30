@@ -56,7 +56,7 @@ class CloseHub_REST_API {
 			'callback'            => [ $this, 'update_post' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
 			'args'                => [
-				'id'      => [ 'required' => true, 'type' => 'integer', 'validate_callback' => 'is_numeric' ],
+				'id'      => [ 'required' => true, 'type' => 'integer', 'validate_callback' => static fn( $v ) => is_numeric( $v ) ],
 				'title'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				'content' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
 				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
@@ -107,7 +107,7 @@ class CloseHub_REST_API {
 			'callback'            => [ $this, 'get_form' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
 			'args'                => [
-				'id' => [ 'required' => true, 'type' => 'integer', 'validate_callback' => 'is_numeric' ],
+				'id' => [ 'required' => true, 'type' => 'integer', 'validate_callback' => static fn( $v ) => is_numeric( $v ) ],
 			],
 		] );
 
@@ -122,12 +122,73 @@ class CloseHub_REST_API {
 			],
 		] );
 
+		// ── Easy License Manager ───────────────────────────────────────────────
+		register_rest_route( self::NAMESPACE, '/elm-releases', [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'create_elm_release' ],
+			'permission_callback' => [ $this, 'check_api_key' ],
+			'args'                => [
+				'product_id'  => [ 'required' => false, 'type' => 'integer', 'validate_callback' => static fn( $v ) => is_numeric( $v ) ],
+				'product_sku' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'version'     => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'changelog'   => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+				'zip_url'     => [
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => [ $this, 'sanitize_download_path' ],
+					'validate_callback' => static fn( $v ) => '' !== trim( (string) $v ),
+				],
+				'tested'         => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'requires'       => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'requires_php'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'upgrade_notice' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+			],
+		] );
+
+		register_rest_route( self::NAMESPACE, '/elm-releases/(?P<id>\d+)', [
+			'methods'             => 'PUT',
+			'callback'            => [ $this, 'update_elm_release' ],
+			'permission_callback' => [ $this, 'check_api_key' ],
+			'args'                => [
+				'id'             => [ 'required' => true, 'type' => 'integer', 'validate_callback' => static fn( $v ) => is_numeric( $v ) ],
+				'version'        => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'changelog'      => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+				'zip_url'        => [
+					'required'          => false,
+					'type'              => 'string',
+					'sanitize_callback' => [ $this, 'sanitize_download_path' ],
+					'validate_callback' => static fn( $v ) => null === $v || '' !== trim( (string) $v ),
+				],
+				'tested'         => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'requires'       => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'requires_php'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'upgrade_notice' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
+			],
+		] );
+
 		// ── Ping / verify connection ───────────────────────────────────────────
 		register_rest_route( self::NAMESPACE, '/ping', [
 			'methods'             => WP_REST_Server::READABLE,
 			'callback'            => [ $this, 'ping' ],
 			'permission_callback' => [ $this, 'check_api_key' ],
 		] );
+	}
+
+	// ── Sanitizers ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Sanitizes a zip_url value for elm-releases. sanitize_text_field()
+	 * strips every %XX percent-encoded sequence (see _sanitize_text_fields()
+	 * in wp-includes/formatting.php), which would corrupt a signed URL or a
+	 * path containing an encoded character. This value is only ever stored
+	 * as a WooCommerce download file path/URL and passed to basename() — it
+	 * is never rendered as HTML — so only control characters and surrounding
+	 * whitespace need stripping.
+	 */
+	public function sanitize_download_path( $value ): string {
+		$value = (string) $value;
+		$value = preg_replace( '/[\x00-\x1F\x7F]/', '', $value );
+		return trim( $value );
 	}
 
 	// ── Permission callback ────────────────────────────────────────────────────
@@ -230,6 +291,14 @@ class CloseHub_REST_API {
 
 	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
+	}
+
+	public function create_elm_release( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->create_elm_release_data( $request ) );
+	}
+
+	public function update_elm_release( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->update_elm_release_data( $request ) );
 	}
 
 	// ── MCP-facing wrappers ────────────────────────────────────────────────────
@@ -639,6 +708,140 @@ class CloseHub_REST_API {
 			'average_order' => $count > 0 ? round( $total_sales / $count, 2 ) : 0.0,
 			'orders'        => $items,
 		];
+	}
+
+	/**
+	 * Creates a release in Easy License Manager (elm-releases) for a product
+	 * and points that product's WooCommerce download file at the new zip.
+	 * Accepts either `product_id` (Easy License Manager / WooCommerce product
+	 * id) or `product_sku` (resolved to a product id via WooCommerce), since
+	 * a plugin's own release tooling typically only knows its SKU.
+	 */
+	private function create_elm_release_data( WP_REST_Request $request ): array|WP_Error {
+		if ( ! function_exists( 'elmp_create_release' ) || ! class_exists( '\\Enwikuna\\Enwikuna_License_Manager_Pro\\ELMP_Release' ) ) {
+			return new WP_Error( 'closehub_elm_missing', 'Easy License Manager is not active.', [ 'status' => 503 ] );
+		}
+		if ( ! function_exists( 'wc_get_product' ) ) {
+			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
+		}
+
+		$product_id  = (int) $request->get_param( 'product_id' );
+		$product_sku = $request->get_param( 'product_sku' );
+		if ( ! $product_id && null !== $product_sku && '' !== $product_sku ) {
+			$product_id = (int) wc_get_product_id_by_sku( (string) $product_sku );
+		}
+		if ( ! $product_id ) {
+			return new WP_Error( 'closehub_elm_missing_product', 'Provide product_id or a product_sku that matches an existing product.', [ 'status' => 400 ] );
+		}
+
+		$product = wc_get_product( $product_id );
+		if ( ! $product ) {
+			return new WP_Error( 'closehub_elm_product_not_found', 'Product not found.', [ 'status' => 404 ] );
+		}
+
+		$release = \Enwikuna\Enwikuna_License_Manager_Pro\ELMP_Release::get_instance()->create( [
+			'version'        => $request->get_param( 'version' ),
+			'release_date'   => current_time( 'Y-m-d' ),
+			'product_id'     => $product_id,
+			'tested'         => $request->get_param( 'tested' ) ?: null,
+			'requires'       => $request->get_param( 'requires' ) ?: null,
+			'requires_php'   => $request->get_param( 'requires_php' ) ?: null,
+			'changelog'      => maybe_serialize( $request->get_param( 'changelog' ) ),
+			'upgrade_notice' => $request->get_param( 'upgrade_notice' ) ?: null,
+			'source'         => \ELMP_Release_Source_Abstract::REST_API,
+		] );
+
+		if ( ! $release ) {
+			return new WP_Error( 'closehub_elm_release_failed', 'Could not create the release.', [ 'status' => 500 ] );
+		}
+
+		$zip_url = (string) $request->get_param( 'zip_url' );
+		$this->set_product_download( $product, $zip_url );
+
+		return $release->to_array();
+	}
+
+	/**
+	 * Points a product's downloadable file for this plugin's zip at $zip_url,
+	 * without touching any other downloads already on the product (e.g. a
+	 * manual PDF, or a previous zip under a different filename). The id is
+	 * derived deterministically from the zip's filename, so a later call for
+	 * the same filename updates that same download in place — including
+	 * across requests, since WooCommerce doesn't record which download id an
+	 * elm-releases update last touched — while a different filename adds a
+	 * new entry instead of guessing which existing one to overwrite.
+	 */
+	private function set_product_download( WC_Product $product, string $zip_url ): void {
+		$existing     = $product->get_downloads();
+		$name         = wp_basename( (string) wp_parse_url( $zip_url, PHP_URL_PATH ) );
+		$download_id  = md5( 'closehub-elm-release:' . $name );
+
+		$download = new WC_Product_Download();
+		$download->set_id( $download_id );
+		$download->set_name( $name );
+		$download->set_file( $zip_url );
+
+		$existing[ $download_id ] = $download;
+
+		$product->set_downloadable( true );
+		$product->set_downloads( $existing );
+		$product->save();
+	}
+
+	/**
+	 * Updates an existing Easy License Manager release, e.g. to fill in
+	 * tested/requires/requires_php/upgrade_notice after the fact without
+	 * creating a duplicate release for the same version. Only the given
+	 * fields are changed; anything omitted is left as-is. If `zip_url` is
+	 * given, the release's product download file is updated too.
+	 */
+	private function update_elm_release_data( WP_REST_Request $request ): array|WP_Error {
+		if ( ! function_exists( 'elmp_find_release' ) || ! function_exists( 'elmp_update_release' ) ) {
+			return new WP_Error( 'closehub_elm_missing', 'Easy License Manager is not active.', [ 'status' => 503 ] );
+		}
+
+		$release = elmp_find_release( (int) $request->get_param( 'id' ) );
+		if ( ! $release ) {
+			return new WP_Error( 'closehub_elm_release_not_found', 'Release not found.', [ 'status' => 404 ] );
+		}
+
+		// Resolve and validate the download target before changing anything,
+		// so a missing product/WooCommerce doesn't leave the release's
+		// metadata updated but its download file untouched.
+		$product = null;
+		$zip_url = $request->get_param( 'zip_url' );
+		if ( null !== $zip_url ) {
+			if ( ! function_exists( 'wc_get_product' ) ) {
+				return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
+			}
+			$product = wc_get_product( $release->get_product_id() );
+			if ( ! $product ) {
+				return new WP_Error( 'closehub_elm_product_not_found', 'Product not found.', [ 'status' => 404 ] );
+			}
+		}
+
+		$fields = [];
+		foreach ( [ 'version', 'tested', 'requires', 'requires_php', 'upgrade_notice' ] as $field ) {
+			if ( null !== $request->get_param( $field ) ) {
+				$fields[ $field ] = $request->get_param( $field );
+			}
+		}
+		if ( null !== $request->get_param( 'changelog' ) ) {
+			$fields['changelog'] = maybe_serialize( $request->get_param( 'changelog' ) );
+		}
+
+		if ( ! empty( $fields ) ) {
+			$release = elmp_update_release( $fields, $release );
+			if ( ! $release ) {
+				return new WP_Error( 'closehub_elm_release_update_failed', 'Could not update the release.', [ 'status' => 500 ] );
+			}
+		}
+
+		if ( null !== $product ) {
+			$this->set_product_download( $product, (string) $zip_url );
+		}
+
+		return $release->to_array();
 	}
 
 	private function list_forms_data(): array|WP_Error {

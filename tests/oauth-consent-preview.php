@@ -39,7 +39,7 @@ function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_
 function esc_attr( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( string $url ): string { return $url; }
 function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="preview">'; }
-function plugins_url( string $path, string $plugin ): string { return '/assets/' . ltrim( $path, '/' ); }
+function plugins_url( string $path, string $plugin ): string { return '/' . ltrim( $path, '/' ); }
 function wp_get_abilities( array $args = [] ): array {
 	return [
 		'closehub/list-posts'        => new CloseHub_Preview_Ability( 'List posts', 'List or search WordPress content.' ),

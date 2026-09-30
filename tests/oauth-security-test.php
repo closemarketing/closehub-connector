@@ -144,6 +144,7 @@ closehub_test_assert( false !== strpos( $consent_html, 'assets/logo-closehub.svg
 closehub_test_assert( false !== strpos( $consent_html, 'Habilidades autorizadas' ), 'The consent page must explain the authorized abilities.' );
 closehub_test_assert( false !== strpos( $consent_html, 'List posts' ) && false !== strpos( $consent_html, 'Update post' ), 'The consent page must list registered CloseHub MCP abilities.' );
 closehub_test_assert( strpos( $consent_html, 'List posts' ) < strpos( $consent_html, 'Update post' ), 'The consent page must sort abilities by their label.' );
+closehub_test_assert( false === strpos( $consent_html, 'List or search WordPress content.' ), 'The consent page must keep every ability to a single compact row.' );
 unset( $GLOBALS['closehub_test_abilities'] );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────

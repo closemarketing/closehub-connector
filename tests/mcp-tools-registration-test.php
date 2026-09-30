@@ -46,6 +46,7 @@ $expected = [
 	'closehub/list-unused-plugins',
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',
+	'closehub/clear-cache',
 ];
 
 if ( $expected !== $config['tools'] ) {

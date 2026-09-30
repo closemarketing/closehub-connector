@@ -6,7 +6,9 @@ defined( 'ABSPATH' ) || exit;
 class CloseHub_OAuth {
 	private const NS = 'closehub-oauth/v1';
 	private const SCOPE = 'mcp:tools';
-	private const DB_VERSION = '3';
+	private const DB_VERSION = '4';
+	private const CLIENT_ID_MAX_LENGTH = 191;
+	private const CLIENT_METADATA_CACHE_TTL = 300;
 	private const MANAGED_DISCOVERY_OPTION = 'closehub_oauth_managed_discovery';
 	private const METADATA_REPAIR_OPTION = 'closehub_oauth_metadata_needs_regeneration';
 	private const HTACCESS_BEGIN = '# BEGIN CloseHub OAuth Discovery';
@@ -211,6 +213,17 @@ class CloseHub_OAuth {
 	private static function maybe_upgrade(): void {
 		if ( self::DB_VERSION !== get_option( 'closehub_oauth_db_version' ) ) {
 			self::install();
+			self::refresh_well_known_files_after_upgrade();
+		}
+	}
+
+	/** Refresh persisted discovery metadata after a metadata schema upgrade. */
+	private static function refresh_well_known_files_after_upgrade(): void {
+		if ( is_multisite() && ! is_main_site() ) {
+			return;
+		}
+		if ( ! self::initialize_filesystem_for_refresh() || ! self::ensure_well_known_files() ) {
+			update_option( self::METADATA_REPAIR_OPTION, true, false );
 		}
 	}
 
@@ -252,8 +265,9 @@ class CloseHub_OAuth {
 		$data = $request->get_json_params();
 		if ( ! is_array( $data ) ) { return self::error( 'invalid_client_metadata', 'Client metadata must be JSON.' ); }
 		$metadata_client_id = esc_url_raw( (string) ( $data['client_id'] ?? '' ) );
+		if ( strlen( $metadata_client_id ) > self::CLIENT_ID_MAX_LENGTH ) { return self::error( 'invalid_client_metadata', 'client_id is too long.' ); }
 		if ( '' !== $metadata_client_id ) {
-			$metadata = self::client_metadata( $metadata_client_id );
+			$metadata = self::client_metadata_document( $metadata_client_id, false );
 			if ( ! $metadata ) { return self::error( 'invalid_client_metadata', 'The Client ID metadata document is invalid.' ); }
 			// The fetched, verified document is the client's identity — an
 			// unauthenticated request body must not be able to override its
@@ -370,22 +384,27 @@ class CloseHub_OAuth {
 	// rendered as raw HTML, so leaving them unsanitized here is safe.
 	private static function params( WP_REST_Request $r ): array { return [ 'response_type' => sanitize_text_field( (string) $r->get_param( 'response_type' ) ), 'client_id' => (string) $r->get_param( 'client_id' ), 'redirect_uri' => esc_url_raw( (string) $r->get_param( 'redirect_uri' ) ), 'state' => (string) $r->get_param( 'state' ), 'challenge' => sanitize_text_field( (string) $r->get_param( 'code_challenge' ) ), 'method' => sanitize_text_field( (string) $r->get_param( 'code_challenge_method' ) ) ]; }
 	private static function valid_authorize( array $p ): array|WP_Error {
-		// Hosted MCP clients identify themselves with a metadata-document URL.
-		// That verified document is their registration, so no earlier DCR row is
-		// required before they can reach the authorization consent page.
-		$c = str_starts_with( $p['client_id'], 'https://' ) ? self::client_metadata( $p['client_id'] ) : self::client( $p['client_id'] );
+		// Reject malformed requests before an unregistered hosted client can
+		// trigger an outbound metadata request on this public endpoint.
+		if ( strlen( $p['client_id'] ) > self::CLIENT_ID_MAX_LENGTH ) { return self::error( 'invalid_client', 'The OAuth client is unknown or no longer registered.' ); }
+		if ( 'code' !== $p['response_type'] || ! self::valid_redirect_uri( $p['redirect_uri'] ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+
+		// A previous dynamic registration remains authoritative even when its
+		// client_id is an HTTPS URL. This avoids a remote fetch on every consent
+		// request and keeps a registered client available during an outage.
+		$c = self::client( $p['client_id'] );
+		if ( ! $c && str_starts_with( $p['client_id'], 'https://' ) ) {
+			$c = self::client_metadata( $p['client_id'] );
+		}
 		if ( ! $c ) {
 			return self::error( 'invalid_client', 'The OAuth client is unknown or no longer registered.' );
 		}
-		if ( 'code' !== $p['response_type'] || ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) || 'S256' !== $p['method'] || '' === $p['challenge'] ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+		if ( ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
 		return $c;
 	}
 	private static function client_metadata( string $id ): ?array {
-		if ( ! str_starts_with( $id, 'https://' ) ) { return null; }
-		$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
-		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
-		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
+		$metadata = self::client_metadata_document( $id );
+		if ( ! $metadata ) { return null; }
 		$name = sanitize_text_field( (string) ( $metadata['client_name'] ?? '' ) );
 		$uris = $metadata['redirect_uris'] ?? [];
 		if ( '' === $name || ! is_array( $uris ) || [] === $uris || count( $uris ) > 20 ) { return null; }
@@ -393,6 +412,22 @@ class CloseHub_OAuth {
 		$uris = array_values( array_unique( array_map( 'esc_url_raw', $uris ) ) );
 		foreach ( $uris as $uri ) { if ( ! self::valid_redirect_uri( $uri ) ) { return null; } }
 		return [ 'client_id' => $id, 'client_name' => $name, 'redirect_uris' => $uris ];
+	}
+	/** Retrieve a hosted client document after verifying its stable client_id. */
+	private static function client_metadata_document( string $id, bool $use_cache = true ): ?array {
+		if ( ! str_starts_with( $id, 'https://' ) || strlen( $id ) > self::CLIENT_ID_MAX_LENGTH ) { return null; }
+		$key = 'closehub_oauth_cimd_' . hash( 'sha256', $id );
+		if ( $use_cache ) {
+			$cached = get_transient( $key );
+			if ( is_array( $cached ) ) { return $cached; }
+		}
+		if ( ! self::throttle_client_metadata() ) { return null; }
+		$response = wp_safe_remote_get( $id, [ 'timeout' => 10, 'redirection' => 0, 'limit_response_size' => 65536, 'headers' => [ 'Accept' => 'application/json' ] ] );
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) { return null; }
+		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $metadata ) || ! isset( $metadata['client_id'] ) || ! hash_equals( $id, (string) $metadata['client_id'] ) ) { return null; }
+		if ( $use_cache ) { set_transient( $key, $metadata, self::CLIENT_METADATA_CACHE_TTL ); }
+		return $metadata;
 	}
 	private static function client( string $id ): ?array { global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table( 'clients' ) . ' WHERE client_id = %s', $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return null; } $row['redirect_uris'] = json_decode( $row['redirect_uris'], true ) ?: []; return $row; }
@@ -465,6 +500,18 @@ class CloseHub_OAuth {
 		}
 		set_transient( $key, $count + 1, HOUR_IN_SECONDS );
 		return null;
+	}
+
+	/** Limit uncached hosted-client lookups on the public authorization endpoint. */
+	private static function throttle_client_metadata(): bool {
+		$ip  = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
+		$key = 'closehub_oauth_cimd_rate_' . md5( $ip );
+		$count = (int) get_transient( $key );
+		if ( $count >= 20 ) {
+			return false;
+		}
+		set_transient( $key, $count + 1, HOUR_IN_SECONDS );
+		return true;
 	}
 
 	private static function table( string $name ): string { global $wpdb; return $wpdb->prefix . 'closehub_oauth_' . $name; }

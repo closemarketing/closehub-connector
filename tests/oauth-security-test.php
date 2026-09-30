@@ -47,6 +47,7 @@ function get_transient( string $key ) { return $GLOBALS['closehub_test_transient
 function set_transient( string $key, $value, int $expiration ): bool { $GLOBALS['closehub_test_transients'][ $key ] = $value; return true; }
 function is_wp_error( $thing ): bool { return false; }
 function wp_safe_remote_get( string $url, array $args ): array {
+	$GLOBALS['closehub_test_remote_calls'][ $url ] = ( $GLOBALS['closehub_test_remote_calls'][ $url ] ?? 0 ) + 1;
 	if ( isset( $GLOBALS['closehub_test_client_metadata'][ $url ] ) ) { return $GLOBALS['closehub_test_client_metadata'][ $url ]; }
 	return [ 'response' => [ 'code' => 200 ], 'headers' => [ 'content-type' => 'application/json; charset=UTF-8' ], 'body' => str_contains( $url, 'oauth-protected-resource' ) ? wp_json_encode( [ 'resource' => rest_url( 'mcp/mcp-adapter-default-server' ), 'authorization_servers' => [ home_url() ], 'bearer_methods_supported' => [ 'header' ], 'scopes_supported' => [ 'mcp:tools' ] ] ) : wp_json_encode( [ 'issuer' => home_url(), 'authorization_endpoint' => rest_url( 'closehub-oauth/v1/authorize' ), 'token_endpoint' => rest_url( 'closehub-oauth/v1/token' ), 'registration_endpoint' => rest_url( 'closehub-oauth/v1/register' ), 'revocation_endpoint' => rest_url( 'closehub-oauth/v1/revoke' ), 'response_types_supported' => [ 'code' ], 'grant_types_supported' => [ 'authorization_code', 'refresh_token' ], 'token_endpoint_auth_methods_supported' => [ 'none' ], 'code_challenge_methods_supported' => [ 'S256' ], 'client_id_metadata_document_supported' => true, 'scopes_supported' => [ 'mcp:tools' ] ] ) ];
 }
@@ -146,6 +147,19 @@ $invalid_cimd_client = $valid_authorize->invoke( null, [
 	'method' => 'S256',
 ] );
 closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A hosted client metadata document must reject an unlisted redirect URI.' );
+closehub_test_assert( 1 === $GLOBALS['closehub_test_remote_calls'][ $claude_client_id ], 'Hosted client metadata must be cached between authorization requests.' );
+
+$long_client_id = 'https://example.test/' . str_repeat( 'a', 192 );
+$long_client = $valid_authorize->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $long_client_id,
+	'redirect_uri' => 'https://example.test/callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( $long_client instanceof WP_Error && 'invalid_client' === $long_client->get_error_code(), 'Client IDs longer than the database column must be rejected before authorization.' );
+closehub_test_assert( empty( $GLOBALS['closehub_test_remote_calls'][ $long_client_id ] ), 'An overlong client ID must not trigger a metadata request.' );
 
 // ── mcp_request() reads $_GET['rest_route'] / $_SERVER['REQUEST_URI'] ───────
 // Reflection is used because it's a private implementation detail of
@@ -242,6 +256,16 @@ $wp_filesystem = new CloseHub_Test_Filesystem();
 closehub_test_assert( CloseHub_OAuth::ensure_well_known_files(), 'OAuth metadata must be writable through the WordPress filesystem transport.' );
 closehub_test_assert( 3 === $wp_filesystem->writes, 'The WordPress filesystem transport must write both OAuth metadata files and their Apache JSON media type rule.' );
 
+$server_file = $document_root . '/.well-known/oauth-authorization-server';
+$stale_server_metadata = json_decode( (string) file_get_contents( $server_file ), true );
+unset( $stale_server_metadata['client_id_metadata_document_supported'] );
+file_put_contents( $server_file, wp_json_encode( $stale_server_metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
+$refresh_after_upgrade = new ReflectionMethod( CloseHub_OAuth::class, 'refresh_well_known_files_after_upgrade' );
+$refresh_after_upgrade->setAccessible( true );
+$refresh_after_upgrade->invoke( null );
+$upgraded_server_metadata = json_decode( (string) file_get_contents( $server_file ), true );
+closehub_test_assert( true === $upgraded_server_metadata['client_id_metadata_document_supported'], 'An OAuth metadata upgrade must regenerate persisted discovery files.' );
+
 file_put_contents( $document_root . '/.well-known/.htaccess', "<IfModule mod_rewrite.c>\n\tRewriteEngine off\n</IfModule>\n" );
 closehub_test_assert( CloseHub_OAuth::enable_managed_discovery(), 'Managed OAuth discovery must install its Apache routing rule.' );
 $managed_htaccess = (string) file_get_contents( $document_root . '/.well-known/.htaccess' );
@@ -296,6 +320,36 @@ $second_registration = CloseHub_OAuth::register_client( $request );
 closehub_test_assert( 200 === $second_registration->get_status(), 'Re-registering a hosted client must update the existing record.' );
 closehub_test_assert( 1 === count( $wpdb->clients ), 'Re-registering a hosted client must not create a second record.' );
 closehub_test_assert( 'Claude refreshed metadata' === $wpdb->clients[ $client_id ]['client_name'], 'Re-registering a hosted client must refresh verified metadata.' );
+
+$stored_client = $valid_authorize->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $client_id,
+	'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( is_array( $stored_client ) && 'Claude refreshed metadata' === $stored_client['client_name'], 'A registered HTTPS client must authorize from stored data without a remote request.' );
+closehub_test_assert( 2 === $GLOBALS['closehub_test_remote_calls'][ $client_id ], 'A stored HTTPS client must not fetch its metadata again during authorization.' );
+
+class CloseHub_Test_Incomplete_Metadata_Request extends WP_REST_Request {
+	public function get_json_params(): array {
+		return [
+			'client_id' => 'https://example.test/incomplete-client-metadata.json',
+			'client_name' => 'Request fallback client',
+			'redirect_uris' => [ 'https://example.test/callback' ],
+		];
+	}
+}
+
+$incomplete_client_id = 'https://example.test/incomplete-client-metadata.json';
+$GLOBALS['closehub_test_client_metadata'][ $incomplete_client_id ] = [
+	'response' => [ 'code' => 200 ],
+	'headers' => [],
+	'body' => wp_json_encode( [ 'client_id' => $incomplete_client_id ] ),
+];
+$incomplete_registration = CloseHub_OAuth::register_client( new CloseHub_Test_Incomplete_Metadata_Request( 'POST' ) );
+closehub_test_assert( 201 === $incomplete_registration->get_status(), 'Registration must retain request fallbacks when a verified metadata document omits optional profile fields.' );
 
 // ── unknown clients are distinct from malformed authorization parameters ────
 

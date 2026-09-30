@@ -21,6 +21,7 @@ class CloseHub_Site_Abilities {
 		'closehub/list-unused-plugins',
 		'closehub/update-plugins-and-core',
 		'closehub/create-site-user',
+		'closehub/clear-cache',
 	];
 
 	public static function register(): void {

@@ -77,6 +77,7 @@ function wp_safe_remote_get( string $url, array $args ): array {
 function wp_remote_retrieve_response_code( array $response ): int { return $response['response']['code']; }
 function wp_remote_retrieve_header( array $response, string $header ): string { return $response['headers'][ $header ] ?? ''; }
 function wp_remote_retrieve_body( array $response ): string { return $response['body']; }
+function getallheaders(): array { return $GLOBALS['closehub_test_request_headers'] ?? []; }
 
 class CloseHub_Test_WPDB {
 	public string $prefix = 'wp_';
@@ -325,6 +326,24 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 	);
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
+
+// Reverse proxies and some PHP SAPIs expose Authorization outside the two
+// standard $_SERVER keys WordPress normally reads.
+$authorization_header = new ReflectionMethod( CloseHub_OAuth::class, 'authorization_header' );
+$authorization_header->setAccessible( true );
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer direct-token';
+closehub_test_assert( 'Bearer direct-token' === $authorization_header->invoke( null ), 'The direct Authorization server variable must take precedence.' );
+unset( $_SERVER['HTTP_AUTHORIZATION'] );
+$_SERVER['REDIRECT_HTTP_AUTHORIZATION'] = 'Bearer rewritten-token';
+closehub_test_assert( 'Bearer rewritten-token' === $authorization_header->invoke( null ), 'A rewritten Authorization server variable must be accepted.' );
+unset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] );
+$_SERVER['HTTP_X_FORWARDED_AUTHORIZATION'] = 'Bearer forwarded-token';
+closehub_test_assert( 'Bearer forwarded-token' === $authorization_header->invoke( null ), 'A reverse-proxy Authorization server variable must be accepted.' );
+unset( $_SERVER['HTTP_X_FORWARDED_AUTHORIZATION'] );
+$GLOBALS['closehub_test_request_headers'] = [ 'aUtHoRiZaTiOn' => 'Bearer sapi-token' ];
+closehub_test_assert( 'Bearer sapi-token' === $authorization_header->invoke( null ), 'A case-insensitive SAPI request header must be accepted.' );
+unset( $GLOBALS['closehub_test_request_headers'] );
+closehub_test_assert( '' === $authorization_header->invoke( null ), 'A request without an Authorization source must remain unauthenticated.' );
 
 // ── static .well-known discovery metadata ───────────────────────────────────
 

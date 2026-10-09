@@ -336,7 +336,7 @@ class CloseHub_OAuth {
 
 	public static function authenticate( $result ) {
 		if ( null !== $result || ! self::mcp_request() ) { return $result; }
-		$header = (string) ( $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '' );
+		$header = self::authorization_header();
 		if ( '' === $header && is_user_logged_in() ) { return $result; }
 		// The Bearer auth scheme name is case-insensitive per RFC 6750/7235.
 		if ( ! preg_match( '/^Bearer\s+(\S+)$/i', $header, $matches ) ) { header( 'WWW-Authenticate: Bearer resource_metadata="' . esc_url( rest_url( self::NS . '/resource-metadata' ) ) . '"' ); return self::error( 'mcp_authentication_required', 'OAuth authentication is required.', 401 ); }
@@ -419,6 +419,30 @@ class CloseHub_OAuth {
 			'code_challenge'        => $params['challenge'],
 			'code_challenge_method' => $params['method'],
 		];
+	}
+	/** Read Authorization across direct, rewritten, and reverse-proxy PHP SAPIs. */
+	private static function authorization_header(): string {
+		foreach ( [ 'HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_FORWARDED_AUTHORIZATION', 'HTTP_X_ORIGINAL_AUTHORIZATION' ] as $key ) {
+			if ( isset( $_SERVER[ $key ] ) && is_string( $_SERVER[ $key ] ) && '' !== $_SERVER[ $key ] ) {
+				return $_SERVER[ $key ];
+			}
+		}
+
+		$headers = [];
+		if ( function_exists( 'getallheaders' ) ) {
+			$headers = getallheaders();
+		} elseif ( function_exists( 'apache_request_headers' ) ) {
+			$headers = apache_request_headers();
+		}
+		if ( ! is_array( $headers ) ) {
+			return '';
+		}
+		foreach ( $headers as $name => $value ) {
+			if ( 'authorization' === strtolower( (string) $name ) && is_string( $value ) ) {
+				return $value;
+			}
+		}
+		return '';
 	}
 	/**
 	 * Match registered redirects exactly, except for a loopback URI's port.

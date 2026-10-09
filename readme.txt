@@ -124,6 +124,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 = Unreleased =
 * Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.
 * Fixed OAuth PKCE parameters being lost when an authorization request passed through the WordPress login screen.
+* Fixed Bearer authentication behind PHP-FPM and reverse proxies that expose the Authorization header outside the standard WordPress server variables.
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

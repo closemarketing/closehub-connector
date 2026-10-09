@@ -128,6 +128,8 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = Unreleased =
+* Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.
+* Fixed OAuth PKCE parameters being lost when an authorization request passed through the WordPress login screen.
 * Added multisite support to MCP abilities: fan-out across the network or a single site via `site_id` / `site_ids`, per-site permission checks, and a new `closehub/list-sites` ability.
 * Added WPML language management abilities: `list-languages`, `add-language`, `set-default-language` and `duplicate-post` (linked or unlinked copies).
 * Fixed `closehub/update-post` applying the same post ID on every site of a network.

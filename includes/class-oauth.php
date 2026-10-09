@@ -308,7 +308,7 @@ class CloseHub_OAuth {
 		self::restore_user();
 		if ( ! is_user_logged_in() ) {
 			// Use the public OAuth parameter names so the request stays valid after login.
-			$return_args = [ 'response_type' => $params['response_type'], 'client_id' => $params['client_id'], 'redirect_uri' => $params['redirect_uri'], 'state' => $params['state'], 'code_challenge' => $params['challenge'], 'code_challenge_method' => $params['method'] ];
+			$return_args = self::authorization_query_args( $params );
 			wp_safe_redirect( wp_login_url( add_query_arg( $return_args, rest_url( self::NS . '/authorize' ) ) ) );
 			exit;
 		}
@@ -412,8 +412,58 @@ class CloseHub_OAuth {
 		if ( ! $c ) {
 			return self::error( 'invalid_client', 'The OAuth client is unknown or no longer registered.' );
 		}
-		if ( ! in_array( $p['redirect_uri'], $c['redirect_uris'], true ) ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
+		if ( ! self::redirect_uri_matches( $p['redirect_uri'], $c['redirect_uris'] ) ) { return self::error( 'invalid_request', 'Invalid OAuth authorization request.' ); }
 		return $c;
+	}
+	/** Preserve the public OAuth names when an authorization request crosses wp-login.php. */
+	private static function authorization_query_args( array $params ): array {
+		return [
+			'response_type'         => $params['response_type'],
+			'client_id'             => $params['client_id'],
+			'redirect_uri'          => $params['redirect_uri'],
+			'state'                 => $params['state'],
+			'code_challenge'        => $params['challenge'],
+			'code_challenge_method' => $params['method'],
+		];
+	}
+	/**
+	 * Match registered redirects exactly, except for a loopback URI's port.
+	 *
+	 * Native apps bind an available local port immediately before starting
+	 * OAuth. RFC 8252 requires authorization servers to accept that ephemeral
+	 * port while still matching the registered scheme, host, path, and query.
+	 */
+	private static function redirect_uri_matches( string $requested, array $registered_uris ): bool {
+		foreach ( $registered_uris as $registered ) {
+			if ( ! is_string( $registered ) ) {
+				continue;
+			}
+			if ( hash_equals( $registered, $requested ) || self::loopback_redirect_uri_matches( $requested, $registered ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+	private static function loopback_redirect_uri_matches( string $requested, string $registered ): bool {
+		$request_parts    = wp_parse_url( $requested );
+		$registered_parts = wp_parse_url( $registered );
+		if ( ! is_array( $request_parts ) || ! is_array( $registered_parts ) ) {
+			return false;
+		}
+
+		$loopback_hosts = [ 'localhost', '127.0.0.1', '[::1]' ];
+		$request_host   = $request_parts['host'] ?? '';
+		if (
+			'http' !== ( $request_parts['scheme'] ?? '' ) ||
+			'http' !== ( $registered_parts['scheme'] ?? '' ) ||
+			$request_host !== ( $registered_parts['host'] ?? '' ) ||
+			! in_array( $request_host, $loopback_hosts, true )
+		) {
+			return false;
+		}
+
+		unset( $request_parts['port'], $registered_parts['port'] );
+		return $request_parts === $registered_parts;
 	}
 	private static function client_metadata( string $id ): ?array {
 		$metadata = self::client_metadata_document( $id );

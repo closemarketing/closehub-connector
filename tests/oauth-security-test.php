@@ -200,6 +200,52 @@ $invalid_cimd_client = $valid_authorize->invoke( null, [
 closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A hosted client metadata document must reject an unlisted redirect URI.' );
 closehub_test_assert( 1 === $GLOBALS['closehub_test_remote_calls'][ $claude_client_id ], 'Hosted client metadata must be cached between authorization requests.' );
 
+// Codex registers a stable loopback URI without a port, then listens on an
+// ephemeral port for each login. RFC 8252 permits only that port component to
+// differ; the scheme, host, path, and query must remain registered exactly.
+$codex_client_id = 'https://chatgpt.com/oauth/codex/test-client/client.json';
+$GLOBALS['closehub_test_client_metadata'][ $codex_client_id ] = [
+	'response' => [ 'code' => 200 ],
+	'headers' => [],
+	'body' => wp_json_encode( [
+		'client_id' => $codex_client_id,
+		'client_name' => 'Codex',
+		'redirect_uris' => [
+			'http://127.0.0.1/callback/test-client',
+			'http://localhost/callback/test-client',
+		],
+	] ),
+];
+$codex_authorize = static function ( string $redirect_uri ) use ( $valid_authorize, $codex_client_id, $challenge ) {
+	return $valid_authorize->invoke( null, [
+		'response_type' => 'code',
+		'client_id' => $codex_client_id,
+		'redirect_uri' => $redirect_uri,
+		'state' => 'state',
+		'challenge' => $challenge,
+		'method' => 'S256',
+	] );
+};
+closehub_test_assert( is_array( $codex_authorize( 'http://127.0.0.1:50514/callback/test-client' ) ), 'A native client must be allowed to add an ephemeral IPv4 loopback port.' );
+closehub_test_assert( is_array( $codex_authorize( 'http://localhost:50515/callback/test-client' ) ), 'A native client must be allowed to add an ephemeral localhost port.' );
+closehub_test_assert( $codex_authorize( 'http://127.0.0.1:50514/callback/other-client' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered path.' );
+closehub_test_assert( $codex_authorize( 'http://localhost:50514/callback/test-client?next=other' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered query.' );
+closehub_test_assert( $codex_authorize( 'http://127.0.0.1:50514/callback/test-client#fragment' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered fragment.' );
+
+$authorization_query_args = new ReflectionMethod( CloseHub_OAuth::class, 'authorization_query_args' );
+$authorization_query_args->setAccessible( true );
+$login_return_args = $authorization_query_args->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $codex_client_id,
+	'redirect_uri' => 'http://127.0.0.1:50514/callback/test-client',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( $challenge === $login_return_args['code_challenge'], 'The login return URL must preserve code_challenge under its public OAuth name.' );
+closehub_test_assert( 'S256' === $login_return_args['code_challenge_method'], 'The login return URL must preserve code_challenge_method under its public OAuth name.' );
+closehub_test_assert( ! isset( $login_return_args['challenge'], $login_return_args['method'] ), 'The login return URL must not expose internal PKCE parameter names.' );
+
 $long_client_id = 'https://example.test/' . str_repeat( 'a', 192 );
 $long_client = $valid_authorize->invoke( null, [
 	'response_type' => 'code',

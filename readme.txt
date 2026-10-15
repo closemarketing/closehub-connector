@@ -122,6 +122,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Fixed a crash on PHP 8+ when a route's numeric `id`/`product_id` argument was validated: `is_numeric` was registered directly as `validate_callback`, but WordPress calls it with 3 arguments and the internal function only accepts 1. Affected `/posts/{id}`, `/gravity-forms/forms/{id}`, and both new `elm-releases` routes.
 
 = Unreleased =
+* Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.
+* Fixed OAuth PKCE parameters being lost when an authorization request passed through the WordPress login screen.
+* Fixed Bearer authentication behind PHP-FPM and reverse proxies that expose the Authorization header outside the standard WordPress server variables.
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

@@ -19,8 +19,16 @@ function __( string $text ): string { return $text; }
 function wp_nonce_field( string $action ): void { echo '<input type="hidden" name="_wpnonce" value="' . esc_attr( $action ) . '">'; }
 function submit_button( string $text, string $type = 'primary', string $name = 'submit', bool $wrap = true ): void { echo '<button class="button ' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '">' . esc_html( $text ) . '</button>'; }
 function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_html__( string $text ): string { return esc_html( $text ); }
 function sanitize_key( string $key ): string { return $key; }
 function esc_textarea( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
+function get_user_by( string $field, int $user_id ) { return $user_id > 0 ? (object) [ 'user_login' => 'claude-team' ] : false; }
+
+class CloseHub_MCP_Token {
+	public static bool $configured = false;
+	public static function get_user_id(): int { return self::$configured ? 7 : 0; }
+	public static function is_configured(): bool { return self::$configured; }
+}
 
 class CloseHub_OAuth {
 	public static bool $metadata_needs_regeneration = true;
@@ -60,6 +68,10 @@ closehub_test_assert( false !== strpos( $output, 'navigator.clipboard.writeText'
 closehub_test_assert( false !== strpos( $output, 'MCP Adapter is not available' ), 'The unavailable Adapter status is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Always required' ), 'The Claude authentication instruction is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Anthropic’s hosted client metadata' ), 'The Claude OAuth client instruction is missing.' );
+closehub_test_assert( false !== strpos( $output, 'Claude Team Shared Token' ), 'The Claude Team shared-token section is missing.' );
+closehub_test_assert( false !== strpos( $output, 'closehub_mcp_token_action' ), 'The shared-token management action is missing.' );
+closehub_test_assert( false !== strpos( $output, 'Generate Shared Token' ), 'The shared-token generation button is missing.' );
+closehub_test_assert( false !== strpos( $output, 'does not use .well-known URLs or an OAuth Client ID' ), 'The Nginx-safe connection explanation is missing.' );
 closehub_test_assert( false !== strpos( $output, 'closehub_regenerate_oauth_metadata' ), 'The OAuth metadata regeneration action is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Regenerate OAuth Metadata' ), 'The OAuth metadata regeneration button is missing.' );
 closehub_test_assert( false !== strpos( $output, 'OAuth discovery metadata is missing, out of date, or cannot be updated' ), 'The OAuth metadata warning is missing when regeneration is required.' );
@@ -88,5 +100,23 @@ $section->invoke( new CloseHub_Admin() );
 $managed_output = (string) ob_get_clean();
 closehub_test_assert( false !== strpos( $managed_output, 'Managed OAuth Discovery is enabled.' ), 'The enabled managed discovery status is missing.' );
 closehub_test_assert( false === strpos( $managed_output, 'OAuth discovery metadata is missing, out of date, or cannot be updated' ), 'Static-file warning must be hidden in managed discovery mode.' );
+
+CloseHub_MCP_Token::$configured = true;
+$token_property = new ReflectionProperty( CloseHub_Admin::class, 'new_mcp_token' );
+$token_property->setAccessible( true );
+$admin = new CloseHub_Admin();
+$token_property->setValue( $admin, 'chm_' . str_repeat( 'a', 64 ) );
+$notice_property = new ReflectionProperty( CloseHub_Admin::class, 'mcp_token_notice' );
+$notice_property->setAccessible( true );
+$notice_property->setValue( $admin, 'generated' );
+ob_start();
+$section->invoke( $admin );
+$configured_output = (string) ob_get_clean();
+closehub_test_assert( false !== strpos( $configured_output, 'id="closehub-mcp-shared-token"' ), 'The newly generated token field is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'stores only its hash' ), 'The one-time token warning is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'choose “No sign-in”' ), 'The Claude Team no-sign-in instruction is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'Authorization: Bearer chm_' ), 'The Claude Team Authorization header example is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'claude-team' ), 'The WordPress user mapped to the shared token is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'Revoke Shared Token' ), 'The shared-token revoke action is missing.' );
 
 echo "MCP settings page checks passed.\n";

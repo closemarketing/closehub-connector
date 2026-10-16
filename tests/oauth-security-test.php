@@ -57,6 +57,9 @@ function wp_mkdir_p( string $target ): bool { return is_dir( $target ) || mkdir(
 function get_home_path(): string { return $GLOBALS['closehub_test_home_path']; }
 function is_multisite(): bool { return false; }
 function is_main_site(): bool { return true; }
+function is_user_logged_in(): bool { return false; }
+function get_user_by( string $field, int $user_id ) { return 7 === $user_id ? (object) [ 'ID' => 7, 'user_login' => 'claude-team' ] : false; }
+function wp_set_current_user( int $user_id ): void { $GLOBALS['closehub_test_current_user'] = $user_id; }
 function wp_json_encode( $value, int $flags = 0 ) { return json_encode( $value, $flags ); }
 function update_option( string $option, $value, bool $autoload = true ): bool { $GLOBALS['closehub_test_options'][ $option ] = $value; return true; }
 function get_option( string $option, $default = false ) { return $GLOBALS['closehub_test_options'][ $option ] ?? $default; }
@@ -100,6 +103,7 @@ class CloseHub_Test_WPDB {
 define( 'ARRAY_A', 'ARRAY_A' );
 $wpdb = new CloseHub_Test_WPDB();
 
+require_once dirname( __DIR__ ) . '/includes/class-mcp-token.php';
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
 function closehub_test_assert( bool $condition, string $message ): void {
@@ -279,6 +283,23 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 	);
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
+
+// A fixed Claude Team token authenticates only the exact MCP endpoint and
+// maps to the WordPress user that generated it, without an OAuth DB lookup.
+$shared_token = CloseHub_MCP_Token::generate( 7 );
+$_GET = [];
+$_SERVER['REQUEST_URI'] = '/wp-json/mcp/mcp-adapter-default-server';
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer ' . $shared_token;
+closehub_test_assert( true === CloseHub_OAuth::authenticate( null ), 'A valid shared MCP token must authenticate.' );
+closehub_test_assert( 7 === $GLOBALS['closehub_test_current_user'], 'A shared MCP token must set its mapped WordPress user.' );
+
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer chm_' . str_repeat( '0', 64 );
+$invalid_shared_token = CloseHub_OAuth::authenticate( null );
+closehub_test_assert( $invalid_shared_token instanceof WP_Error && 'invalid_token' === $invalid_shared_token->get_error_code(), 'An invalid shared MCP token must return invalid_token.' );
+CloseHub_MCP_Token::revoke();
+unset( $_SERVER['HTTP_AUTHORIZATION'], $GLOBALS['closehub_test_current_user'] );
+$_GET = [];
+$_SERVER = [];
 
 // ── static .well-known discovery metadata ───────────────────────────────────
 

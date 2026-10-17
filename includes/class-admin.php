@@ -362,6 +362,11 @@ class CloseHub_Admin {
 		return rest_url( 'mcp/mcp-adapter-default-server' );
 	}
 
+	/** Use WordPress query routing when the web server drops Authorization on pretty REST URLs. */
+	public static function get_mcp_server_query_url(): string {
+		return home_url( '/?rest_route=%2Fmcp%2Fmcp-adapter-default-server' );
+	}
+
 	/**
 	 * Render the MCP connection details shared by the site and network settings pages.
 	 */
@@ -397,12 +402,12 @@ class CloseHub_Admin {
 			<div class="notice notice-error"><p><?php esc_html_e( 'Managed OAuth discovery could not be enabled. Check the WordPress filesystem credentials and Apache rewrite permissions.', 'closehub-connector' ); ?></p></div>
 		<?php endif; ?>
 		<?php if ( $metadata_needs_regeneration ) : ?>
-			<div class="notice notice-warning"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it below before connecting an MCP client.', 'closehub-connector' ); ?></p></div>
+			<div class="notice notice-warning"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it below before connecting an OAuth MCP client.', 'closehub-connector' ); ?></p></div>
 		<?php endif; ?>
 		<p><?php esc_html_e( 'Use this URL to connect an MCP client to this WordPress site.', 'closehub-connector' ); ?></p>
 		<table class="form-table" role="presentation">
 			<tr>
-				<th scope="row"><?php esc_html_e( 'MCP Server URL', 'closehub-connector' ); ?></th>
+				<th scope="row"><?php esc_html_e( 'MCP Server URL (OAuth)', 'closehub-connector' ); ?></th>
 				<td>
 					<input
 						type="text"
@@ -431,6 +436,12 @@ class CloseHub_Admin {
 		</table>
 		<h3><?php esc_html_e( 'Claude Team Shared Token', 'closehub-connector' ); ?></h3>
 		<p><?php esc_html_e( 'Use a shared Bearer token when Nginx blocks OAuth discovery. This connection does not use .well-known URLs or an OAuth Client ID.', 'closehub-connector' ); ?></p>
+		<p><label for="closehub-mcp-query-url"><strong><?php esc_html_e( 'MCP Server URL for Claude Team', 'closehub-connector' ); ?></strong></label></p>
+		<p>
+			<input type="text" id="closehub-mcp-query-url" value="<?php echo esc_attr( self::get_mcp_server_query_url() ); ?>" class="large-text code" readonly />
+			<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-query-url').value)"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+		</p>
+		<p class="description"><?php esc_html_e( 'Use this URL with the shared token if the regular MCP URL returns an authentication error.', 'closehub-connector' ); ?></p>
 		<?php if ( 'generated' === $this->mcp_token_notice ) : ?>
 			<div class="notice notice-success"><p><?php esc_html_e( 'Shared MCP token generated. Copy it now; WordPress stores only its hash and cannot show it again.', 'closehub-connector' ); ?></p></div>
 		<?php elseif ( 'revoked' === $this->mcp_token_notice ) : ?>

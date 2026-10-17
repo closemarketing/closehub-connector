@@ -7,6 +7,7 @@ define( 'ABSPATH', __DIR__ . '/' );
 function rest_url( string $path = '' ): string {
 	return 'https://example.test/wp-json/' . ltrim( $path, '/' );
 }
+function home_url( string $path = '' ): string { return 'https://example.test' . $path; }
 
 function esc_html_e( string $text ): void {
 	echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
@@ -54,6 +55,10 @@ closehub_test_assert(
 	'https://example.test/wp-json/mcp/mcp-adapter-default-server' === $mcp_url,
 	'The MCP URL must use WordPress rest_url().'
 );
+closehub_test_assert(
+	'https://example.test/?rest_route=%2Fmcp%2Fmcp-adapter-default-server' === CloseHub_Admin::get_mcp_server_query_url(),
+	'The Claude Team MCP URL must use WordPress query routing.'
+);
 
 $section = new ReflectionMethod( CloseHub_Admin::class, 'render_mcp_section' );
 $section->setAccessible( true );
@@ -69,6 +74,8 @@ closehub_test_assert( false !== strpos( $output, 'MCP Adapter is not available' 
 closehub_test_assert( false !== strpos( $output, 'Always required' ), 'The Claude authentication instruction is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Anthropic’s hosted client metadata' ), 'The Claude OAuth client instruction is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Claude Team Shared Token' ), 'The Claude Team shared-token section is missing.' );
+closehub_test_assert( false !== strpos( $output, 'id="closehub-mcp-query-url"' ), 'The Claude Team query URL field is missing.' );
+closehub_test_assert( false !== strpos( $output, CloseHub_Admin::get_mcp_server_query_url() ), 'The Claude Team query URL is missing.' );
 closehub_test_assert( false !== strpos( $output, 'closehub_mcp_token_action' ), 'The shared-token management action is missing.' );
 closehub_test_assert( false !== strpos( $output, 'Generate Shared Token' ), 'The shared-token generation button is missing.' );
 closehub_test_assert( false !== strpos( $output, 'does not use .well-known URLs or an OAuth Client ID' ), 'The Nginx-safe connection explanation is missing.' );

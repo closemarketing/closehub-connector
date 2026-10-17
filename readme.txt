@@ -73,7 +73,7 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 1. Upload the `closehub-connector` folder to `/wp-content/plugins/`.
 2. Activate the plugin through the **Plugins** screen in WordPress admin.
-3. Go to **Settings → CloseHub**.
+3. Go to **Settings → CloseHub → API**.
 4. Copy the **Site URL** and **API Key** shown on that page.
 5. Paste both values into CloseHub under your project's WordPress connection settings.
 
@@ -81,15 +81,15 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 = Where do I find my API key? =
 
-Go to **Settings → CloseHub** in your WordPress admin. The key is displayed there along with a copy button.
+Go to **Settings → CloseHub → API** in your WordPress admin. The key is displayed there along with a copy button.
 
 = Can I regenerate the API key? =
 
-Yes. Click **Regenerate Key** on the Settings → CloseHub page. The old key stops working immediately — update CloseHub with the new key right away.
+Yes. Click **Regenerate Key** on the Settings → CloseHub → API tab. The old key stops working immediately — update CloseHub with the new key right away.
 
 = How do I connect Claude Team when OAuth discovery is blocked? =
 
-Go to **Settings → CloseHub**, generate a **Claude Team Shared Token**, and copy its complete `Bearer chm_...` header value immediately. In Claude Team, use the **MCP Server URL for Claude Team** shown there, choose **No sign-in** authentication, and add a Request header named `authorization` with the copied value. This URL uses `?rest_route=%2Fmcp%2Fmcp-adapter-default-server`, which can preserve the Authorization header when the regular `/wp-json/mcp/...` path loses it in a web-server rewrite. It also avoids OAuth and `.well-known` discovery. Everyone using that connector shares the WordPress permissions of the user who generated the token.
+Go to **Settings → CloseHub → MCP**, generate a **Claude Team Shared Token**, and copy its complete `Bearer chm_...` header value immediately. In Claude Team, use the **MCP Server URL for Claude Team** shown there, choose **No sign-in** authentication, and add a Request header named `authorization` with the copied value. This URL uses `?rest_route=%2Fmcp%2Fmcp-adapter-default-server`, which can preserve the Authorization header when the regular `/wp-json/mcp/...` path loses it in a web-server rewrite. It also avoids OAuth and `.well-known` discovery. Everyone using that connector shares the WordPress permissions of the user who generated the token.
 
 = Do I need WooCommerce or Gravity Forms installed? =
 
@@ -126,6 +126,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Fixed a crash on PHP 8+ when a route's numeric `id`/`product_id` argument was validated: `is_numeric` was registered directly as `validate_callback`, but WordPress calls it with 3 arguments and the internal function only accepts 1. Affected `/posts/{id}`, `/gravity-forms/forms/{id}`, and both new `elm-releases` routes.
 
 = Unreleased =
+* Split CloseHub settings into API and MCP tabs for both single sites and multisite networks.
 * Added a revocable shared MCP Bearer token for Claude Team connectors, avoiding OAuth discovery on Nginx hosts that block `.well-known` paths.
 
 = 1.1.2 =

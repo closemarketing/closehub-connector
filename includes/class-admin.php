@@ -65,6 +65,30 @@ class CloseHub_Admin {
 		);
 	}
 
+	private static function current_tab(): string {
+		$tab = isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'api'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- navigation only.
+		return 'mcp' === $tab ? 'mcp' : 'api';
+	}
+
+	private static function settings_url( string $tab, bool $network = false ): string {
+		$base_url = $network ? network_admin_url( 'settings.php?page=closehub-connector' ) : menu_page_url( 'closehub-connector', false );
+		return add_query_arg( 'tab', $tab, $base_url );
+	}
+
+	private function render_tabs( string $current_tab, bool $network = false ): void {
+		$tabs = [
+			'api' => __( 'API', 'closehub-connector' ),
+			'mcp' => __( 'MCP', 'closehub-connector' ),
+		];
+		?>
+		<nav class="nav-tab-wrapper" aria-label="<?php echo esc_attr( __( 'CloseHub settings', 'closehub-connector' ) ); ?>">
+			<?php foreach ( $tabs as $tab => $label ) : ?>
+				<a href="<?php echo esc_url( self::settings_url( $tab, $network ) ); ?>" class="nav-tab<?php echo $current_tab === $tab ? ' nav-tab-active' : ''; ?>"<?php echo $current_tab === $tab ? ' aria-current="page"' : ''; ?>><?php echo esc_html( $label ); ?></a>
+			<?php endforeach; ?>
+		</nav>
+		<?php
+	}
+
 	public function handle_regenerate(): void {
 		if ( ! isset( $_POST['closehub_regenerate'] ) ) {
 			return;
@@ -74,7 +98,7 @@ class CloseHub_Admin {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
 		CloseHub_API_Key::regenerate();
-		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', menu_page_url( 'closehub-connector', false ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url( 'api' ) ) );
 		exit;
 	}
 
@@ -87,11 +111,11 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( menu_page_url( 'closehub-connector', false ) ) ) {
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp' ) ) ) {
 			return;
 		}
 		$notice = CloseHub_OAuth::ensure_well_known_files() ? 'oauth_metadata_regenerated' : 'oauth_metadata_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, menu_page_url( 'closehub-connector', false ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp' ) ) );
 		exit;
 	}
 
@@ -104,11 +128,11 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( menu_page_url( 'closehub-connector', false ), 'closehub_enable_managed_oauth_discovery' ) ) {
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp' ), 'closehub_enable_managed_oauth_discovery' ) ) {
 			return;
 		}
 		$notice = CloseHub_OAuth::enable_managed_discovery() ? 'managed_oauth_discovery_enabled' : 'managed_oauth_discovery_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, menu_page_url( 'closehub-connector', false ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp' ) ) );
 		exit;
 	}
 
@@ -120,9 +144,13 @@ class CloseHub_Admin {
 		$api_key  = CloseHub_API_Key::get();
 		$site_url = get_site_url();
 		$notice   = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
+		$tab      = self::current_tab();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'CloseHub Connector', 'closehub-connector' ); ?></h1>
+			<?php $this->render_tabs( $tab ); ?>
+
+			<?php if ( 'api' === $tab ) : ?>
 
 			<?php if ( 'regenerated' === $notice ) : ?>
 				<div class="notice notice-success is-dismissible">
@@ -167,8 +195,6 @@ class CloseHub_Admin {
 				</tr>
 			</table>
 
-			<?php $this->render_mcp_section(); ?>
-
 			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
 			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one. You will need to update CloseHub with the new key.', 'closehub-connector' ); ?></p>
 			<form method="post">
@@ -195,6 +221,9 @@ class CloseHub_Admin {
 					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms/{id}/entries</code></td><td><?php esc_html_e( 'Count form entries', 'closehub-connector' ); ?></td></tr>
 				</tbody>
 			</table>
+			<?php else : ?>
+				<?php $this->render_mcp_section(); ?>
+			<?php endif; ?>
 		</div>
 		<?php
 	}
@@ -219,7 +248,7 @@ class CloseHub_Admin {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
 		CloseHub_API_Key::regenerate();
-		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', network_admin_url( 'settings.php?page=closehub-connector' ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url( 'api', true ) ) );
 		exit;
 	}
 
@@ -232,11 +261,11 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_network_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( network_admin_url( 'settings.php?page=closehub-connector' ) ) ) {
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp', true ) ) ) {
 			return;
 		}
 		$notice = CloseHub_OAuth::ensure_well_known_files() ? 'oauth_metadata_regenerated' : 'oauth_metadata_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, network_admin_url( 'settings.php?page=closehub-connector' ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp', true ) ) );
 		exit;
 	}
 
@@ -249,7 +278,7 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_network_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		$url = network_admin_url( 'settings.php?page=closehub-connector' );
+		$url = self::settings_url( 'mcp', true );
 		if ( ! CloseHub_OAuth::initialize_filesystem( $url, 'closehub_enable_managed_oauth_discovery' ) ) {
 			return;
 		}
@@ -267,9 +296,13 @@ class CloseHub_Admin {
 		$network_url = network_site_url();
 		$notice      = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
 		$sites       = get_sites( [ 'number' => 0 ] );
+		$tab         = self::current_tab();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'CloseHub Connector', 'closehub-connector' ); ?></h1>
+			<?php $this->render_tabs( $tab, true ); ?>
+
+			<?php if ( 'api' === $tab ) : ?>
 
 			<?php if ( 'regenerated' === $notice ) : ?>
 				<div class="notice notice-success is-dismissible">
@@ -304,8 +337,6 @@ class CloseHub_Admin {
 					</td>
 				</tr>
 			</table>
-
-			<?php $this->render_mcp_section(); ?>
 
 			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
 			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one for every site in the network.', 'closehub-connector' ); ?></p>
@@ -351,6 +382,9 @@ class CloseHub_Admin {
 					<?php endforeach; ?>
 				</tbody>
 			</table>
+			<?php else : ?>
+				<?php $this->render_mcp_section(); ?>
+			<?php endif; ?>
 		</div>
 		<?php
 	}

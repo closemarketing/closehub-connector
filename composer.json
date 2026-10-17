@@ -5,7 +5,7 @@
     "license": "GPL-2.0-or-later",
     "require": {
         "php": ">=8.1",
-        "wordpress/mcp-adapter": "^0.6"
+        "wordpress/mcp-adapter": "^0.7"
     },
     "require-dev": {
         "php-stubs/wordpress-stubs": "^7.1",

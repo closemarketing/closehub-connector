@@ -120,9 +120,12 @@ ob_start();
 $section->invoke( $admin );
 $configured_output = (string) ob_get_clean();
 closehub_test_assert( false !== strpos( $configured_output, 'id="closehub-mcp-shared-token"' ), 'The newly generated token field is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'value="Bearer chm_' . str_repeat( 'a', 64 ) . '"' ), 'The copyable header value must include Bearer and the full token.' );
+closehub_test_assert( false !== strpos( $configured_output, 'Copy header value' ), 'The complete header value copy button is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'stores only its hash' ), 'The one-time token warning is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'choose “No sign-in”' ), 'The Claude Team no-sign-in instruction is missing.' );
-closehub_test_assert( false !== strpos( $configured_output, 'Authorization: Bearer chm_' ), 'The Claude Team Authorization header example is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'named authorization.' ), 'The Claude Team header name is missing.' );
+closehub_test_assert( false !== strpos( $configured_output, 'authorization: Bearer chm_' ), 'The Claude Team authorization header example is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'claude-team' ), 'The WordPress user mapped to the shared token is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'Revoke Shared Token' ), 'The shared-token revoke action is missing.' );
 

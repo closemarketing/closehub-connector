@@ -89,7 +89,7 @@ Yes. Click **Regenerate Key** on the Settings → CloseHub page. The old key sto
 
 = How do I connect Claude Team when OAuth discovery is blocked? =
 
-Go to **Settings → CloseHub**, generate a **Claude Team Shared Token**, and copy it immediately. In Claude Team, use the **MCP Server URL for Claude Team** shown there, choose **No sign-in** authentication, and add the Request header `Authorization: Bearer chm_...`. This URL uses `?rest_route=%2Fmcp%2Fmcp-adapter-default-server`, which can preserve the Authorization header when the regular `/wp-json/mcp/...` path loses it in a web-server rewrite. It also avoids OAuth and `.well-known` discovery. Everyone using that connector shares the WordPress permissions of the user who generated the token.
+Go to **Settings → CloseHub**, generate a **Claude Team Shared Token**, and copy its complete `Bearer chm_...` header value immediately. In Claude Team, use the **MCP Server URL for Claude Team** shown there, choose **No sign-in** authentication, and add a Request header named `authorization` with the copied value. This URL uses `?rest_route=%2Fmcp%2Fmcp-adapter-default-server`, which can preserve the Authorization header when the regular `/wp-json/mcp/...` path loses it in a web-server rewrite. It also avoids OAuth and `.well-known` discovery. Everyone using that connector shares the WordPress permissions of the user who generated the token.
 
 = Do I need WooCommerce or Gravity Forms installed? =
 

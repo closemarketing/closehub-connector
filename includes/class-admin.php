@@ -450,9 +450,10 @@ class CloseHub_Admin {
 			<div class="notice notice-error"><p><?php esc_html_e( 'The shared MCP token could not be saved.', 'closehub-connector' ); ?></p></div>
 		<?php endif; ?>
 		<?php if ( '' !== $this->new_mcp_token ) : ?>
+			<p><label for="closehub-mcp-shared-token"><strong><?php esc_html_e( 'authorization header value', 'closehub-connector' ); ?></strong></label></p>
 			<p>
-				<input type="text" id="closehub-mcp-shared-token" value="<?php echo esc_attr( $this->new_mcp_token ); ?>" class="large-text code" readonly />
-				<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-shared-token').value)"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+				<input type="text" id="closehub-mcp-shared-token" value="<?php echo esc_attr( 'Bearer ' . $this->new_mcp_token ); ?>" class="large-text code" readonly />
+				<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-shared-token').value)"><?php esc_html_e( 'Copy header value', 'closehub-connector' ); ?></button>
 			</p>
 		<?php endif; ?>
 		<?php if ( $shared_token_user && CloseHub_MCP_Token::is_configured() ) : ?>
@@ -467,18 +468,18 @@ class CloseHub_Admin {
 			</p>
 			<ol>
 				<li><?php esc_html_e( 'In Claude Team, choose “No sign-in” for Authentication.', 'closehub-connector' ); ?></li>
-				<li><?php esc_html_e( 'Add a Request header named Authorization.', 'closehub-connector' ); ?></li>
+				<li><?php esc_html_e( 'Add a Request header named authorization.', 'closehub-connector' ); ?></li>
 				<li>
 					<?php
 					if ( '' !== $this->new_mcp_token ) {
-						esc_html_e( 'Set its value to Bearer followed by the token shown above.', 'closehub-connector' );
+						esc_html_e( 'Copy the complete header value shown above, including Bearer and the following space.', 'closehub-connector' );
 					} else {
-						esc_html_e( 'Set its value to Bearer followed by the token you copied when it was generated.', 'closehub-connector' );
+						esc_html_e( 'Use the complete Bearer value you copied when the token was generated.', 'closehub-connector' );
 					}
 					?>
 				</li>
 			</ol>
-			<p><code>Authorization: Bearer chm_…</code></p>
+			<p><code>authorization: Bearer chm_…</code></p>
 		<?php else : ?>
 			<p><?php esc_html_e( 'No shared MCP token is configured.', 'closehub-connector' ); ?></p>
 		<?php endif; ?>

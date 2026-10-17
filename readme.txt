@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.0
-Version: 1.2.0
+Stable tag: 1.2.1
+Version: 1.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -114,6 +114,11 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= 1.2.1 =
+* Added a revocable shared MCP Bearer token for Claude Team connections when OAuth discovery is blocked by the web server. The token uses the permissions of its WordPress creator and can be rotated or revoked from the MCP settings tab. (#47)
+* Added a query-routed MCP server URL for hosts where the `/wp-json/` rewrite drops the `authorization` header, and made the complete `Bearer chm_...` value copyable for Claude Team setup. (#47)
+* Split CloseHub settings into API and MCP tabs on single sites and multisite networks. (#47)
+
 = 1.2.0 =
 * Added WordPress Multilingual Plugin (WPML) support to MCP and REST content creation, including optional language assignment and translation-group linking. (#30)
 * Added MCP image uploads from base64 to the Media Library, with validation, quota checks, attachment metadata safeguards, and reuse as a post's featured image. (#40)
@@ -124,10 +129,6 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Added `POST /closehub/v1/elm-releases` to create an Easy License Manager release and update the product's WooCommerce download file in one call, unblocking automated premium-plugin releases. Accepts optional `tested`, `requires`, `requires_php`, and `upgrade_notice`. Preserves any other downloadable files already on the product instead of replacing them. Returns `503` if Easy License Manager is not active. (#19)
 * Added `PUT /closehub/v1/elm-releases/{id}` to update fields on an existing release (and its product's download file) without creating a duplicate release for the same version.
 * Fixed a crash on PHP 8+ when a route's numeric `id`/`product_id` argument was validated: `is_numeric` was registered directly as `validate_callback`, but WordPress calls it with 3 arguments and the internal function only accepts 1. Affected `/posts/{id}`, `/gravity-forms/forms/{id}`, and both new `elm-releases` routes.
-
-= Unreleased =
-* Split CloseHub settings into API and MCP tabs for both single sites and multisite networks.
-* Added a revocable shared MCP Bearer token for Claude Team connectors, avoiding OAuth discovery on Nginx hosts that block `.well-known` paths.
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

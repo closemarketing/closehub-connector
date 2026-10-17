@@ -63,14 +63,9 @@ final class CloseHub_MCP_Token {
 		return $user_id;
 	}
 
-	/** Immediately revoke the configured shared token. */
-	public static function revoke(): void {
-		if ( is_multisite() ) {
-			delete_site_option( self::OPTION );
-			return;
-		}
-
-		delete_option( self::OPTION );
+	/** Immediately revoke the configured shared token and report whether deletion succeeded. */
+	public static function revoke(): bool {
+		return is_multisite() ? delete_site_option( self::OPTION ) : delete_option( self::OPTION );
 	}
 
 	private static function stored(): mixed {

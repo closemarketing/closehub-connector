@@ -37,8 +37,7 @@ class CloseHub_Admin {
 		check_admin_referer( 'closehub_manage_mcp_token' );
 		$action = sanitize_key( wp_unslash( (string) $_POST['closehub_mcp_token_action'] ) );
 		if ( 'revoke' === $action ) {
-			CloseHub_MCP_Token::revoke();
-			$this->mcp_token_notice = 'revoked';
+			$this->mcp_token_notice = CloseHub_MCP_Token::revoke() ? 'revoked' : 'revoke_failed';
 			return;
 		}
 		if ( 'generate' !== $action ) {
@@ -480,6 +479,8 @@ class CloseHub_Admin {
 			<div class="notice notice-success"><p><?php esc_html_e( 'Shared MCP token generated. Copy it now; WordPress stores only its hash and cannot show it again.', 'closehub-connector' ); ?></p></div>
 		<?php elseif ( 'revoked' === $this->mcp_token_notice ) : ?>
 			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Shared MCP token revoked.', 'closehub-connector' ); ?></p></div>
+		<?php elseif ( 'revoke_failed' === $this->mcp_token_notice ) : ?>
+			<div class="notice notice-error"><p><?php esc_html_e( 'The shared MCP token could not be revoked. It may still be active; please try again.', 'closehub-connector' ); ?></p></div>
 		<?php elseif ( 'failed' === $this->mcp_token_notice ) : ?>
 			<div class="notice notice-error"><p><?php esc_html_e( 'The shared MCP token could not be saved.', 'closehub-connector' ); ?></p></div>
 		<?php endif; ?>

@@ -22,13 +22,19 @@ function submit_button( string $text, string $type = 'primary', string $name = '
 function esc_html( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_html__( string $text ): string { return esc_html( $text ); }
 function sanitize_key( string $key ): string { return $key; }
+function wp_unslash( string $value ): string { return $value; }
+function is_multisite(): bool { return false; }
+function current_user_can( string $capability ): bool { return true; }
+function check_admin_referer( string $action ): int { return 1; }
 function esc_textarea( string $text ): string { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
 function get_user_by( string $field, int $user_id ) { return $user_id > 0 ? (object) [ 'user_login' => 'claude-team' ] : false; }
 
 class CloseHub_MCP_Token {
 	public static bool $configured = false;
+	public static bool $revoke_succeeds = true;
 	public static function get_user_id(): int { return self::$configured ? 7 : 0; }
 	public static function is_configured(): bool { return self::$configured; }
+	public static function revoke(): bool { if ( self::$revoke_succeeds ) { self::$configured = false; } return self::$revoke_succeeds; }
 }
 
 class CloseHub_OAuth {
@@ -128,5 +134,26 @@ closehub_test_assert( false !== strpos( $configured_output, 'named authorization
 closehub_test_assert( false !== strpos( $configured_output, 'authorization: Bearer chm_' ), 'The Claude Team authorization header example is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'claude-team' ), 'The WordPress user mapped to the shared token is missing.' );
 closehub_test_assert( false !== strpos( $configured_output, 'Revoke Shared Token' ), 'The shared-token revoke action is missing.' );
+
+$_POST['closehub_mcp_token_action'] = 'revoke';
+CloseHub_MCP_Token::$revoke_succeeds = false;
+$failed_revoke_admin = new CloseHub_Admin();
+$failed_revoke_admin->handle_mcp_token();
+ob_start();
+$section->invoke( $failed_revoke_admin );
+$failed_revoke_output = (string) ob_get_clean();
+closehub_test_assert( false !== strpos( $failed_revoke_output, 'could not be revoked' ), 'Failed deletion must show a revocation error.' );
+closehub_test_assert( false === strpos( $failed_revoke_output, 'Shared MCP token revoked.' ), 'Failed deletion must not show a revocation success notice.' );
+closehub_test_assert( false !== strpos( $failed_revoke_output, 'Revoke Shared Token' ), 'Failed deletion must leave the revocation action available.' );
+
+CloseHub_MCP_Token::$revoke_succeeds = true;
+$successful_revoke_admin = new CloseHub_Admin();
+$successful_revoke_admin->handle_mcp_token();
+ob_start();
+$section->invoke( $successful_revoke_admin );
+$successful_revoke_output = (string) ob_get_clean();
+closehub_test_assert( false !== strpos( $successful_revoke_output, 'Shared MCP token revoked.' ), 'Successful deletion must show a revocation success notice.' );
+closehub_test_assert( false === strpos( $successful_revoke_output, 'could not be revoked' ), 'Successful deletion must not show a revocation error.' );
+unset( $_POST['closehub_mcp_token_action'] );
 
 echo "MCP settings page checks passed.\n";

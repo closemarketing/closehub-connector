@@ -4,12 +4,12 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.0
-Version: 1.2.0
+Stable tag: 1.2.1
+Version: 1.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Connect your WordPress site to CloseHub with a single API key in order to send statistics.
+Connect WordPress to CloseHub with one API key and expose content and site tools to MCP clients such as Claude.
 
 == Description ==
 
@@ -17,7 +17,11 @@ CloseHub Connector replaces the multiple credentials previously required to link
 
 Once the plugin is activated, it generates a secure API key and exposes a dedicated REST API namespace (`/wp-json/closehub/v1/`) that CloseHub uses to interact with your site.
 
-It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, upload an image, update a post slug, replace one exact Gutenberg block, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. `closehub/upload-media` accepts an image as `data_base64`, returns its Media Library URL, and requires the user's `upload_files` capability; pass that URL as `featured_image_url` to create or update content without uploading a duplicate. `closehub/update-post-slug` accepts a post ID and slug, then returns the normalized unique slug and resulting URL. `closehub/get-post` returns a `content_hash`; use it with `closehub/replace-gutenberg-block`, a zero-based `block_path`, the current block name, and one replacement serialized block so a stale read cannot overwrite newer content. These abilities default to the `post` type but accept a `post_type` input for any other post type registered with an admin UI — pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), or custom post types. Authenticate with a WordPress user account that has the required post capabilities; the CloseHub API key is not used for MCP authentication.
+It also exposes content abilities through the WordPress MCP Adapter. MCP clients can discover, list, read, create, update, upload an image, update a post slug, replace one exact Gutenberg block, and send posts to the trash using the server at `/wp-json/mcp/mcp-adapter-default-server`. `closehub/upload-media` accepts an image as `data_base64`, returns its Media Library URL, and requires the user's `upload_files` capability; pass that URL as `featured_image_url` to create or update content without uploading a duplicate. `closehub/update-post-slug` accepts a post ID and slug, then returns the normalized unique slug and resulting URL. `closehub/get-post` returns a `content_hash`; use it with `closehub/replace-gutenberg-block`, a zero-based `block_path`, the current block name, and one replacement serialized block so a stale read cannot overwrite newer content. These abilities default to the `post` type but accept a `post_type` input for any other post type registered with an admin UI — pages, WooCommerce products (including product types WooCommerce's own MCP abilities don't support, such as subscriptions), or custom post types. Authenticate with OAuth as a WordPress user, or generate a fixed `chm_` Bearer token under Settings → CloseHub for a shared Claude Team connector. The shared token acts with the capabilities of the WordPress user who generated it, is stored only as a hash, and can be rotated or revoked immediately. The CloseHub API key is not used for MCP authentication.
+
+**API and MCP settings:** The **API** tab under Settings → CloseHub contains the site URL and API key used by CloseHub's REST integration. The **MCP** tab contains the MCP connection details, OAuth discovery tools, and Claude Team shared-token controls. On multisite, these tabs are under Network Admin → Settings → CloseHub.
+
+**Claude Team without OAuth discovery:** If the web server blocks the `.well-known` paths required by OAuth, generate a **Claude Team Shared Token** in the **MCP** tab. Copy the complete `Bearer chm_...` value when it appears; WordPress stores only its hash and cannot display it again. In Claude Team, choose **No sign-in**, use the displayed **MCP Server URL for Claude Team**, and add a required Request header named `authorization` with that value. The displayed URL uses a `?rest_route=` query to help preserve the header when a server rewrite strips it from `/wp-json/` requests. Everyone sharing this connector has the WordPress permissions of the user who generated the token until it is rotated or revoked. Keep the token secret; the API key in the **API** tab cannot authenticate MCP requests.
 
 When WPML is active, create-post and `POST /closehub/v1/posts` also accept `language` and an optional `translation_of` source post ID. The connector assigns the new post to the requested language and joins it to the source post's translation group. List/get/create responses include the language and translation-group details. Existing posts retain their language on update.
 
@@ -73,7 +77,7 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 1. Upload the `closehub-connector` folder to `/wp-content/plugins/`.
 2. Activate the plugin through the **Plugins** screen in WordPress admin.
-3. Go to **Settings → CloseHub**.
+3. Go to **Settings → CloseHub → API**.
 4. Copy the **Site URL** and **API Key** shown on that page.
 5. Paste both values into CloseHub under your project's WordPress connection settings.
 
@@ -81,11 +85,15 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 = Where do I find my API key? =
 
-Go to **Settings → CloseHub** in your WordPress admin. The key is displayed there along with a copy button.
+Go to **Settings → CloseHub → API** in your WordPress admin. The key is displayed there along with a copy button.
 
 = Can I regenerate the API key? =
 
-Yes. Click **Regenerate Key** on the Settings → CloseHub page. The old key stops working immediately — update CloseHub with the new key right away.
+Yes. Click **Regenerate Key** on the Settings → CloseHub → API tab. The old key stops working immediately — update CloseHub with the new key right away.
+
+= How do I connect Claude Team when OAuth discovery is blocked? =
+
+Go to **Settings → CloseHub → MCP**, generate a **Claude Team Shared Token**, and copy its complete `Bearer chm_...` header value immediately. In Claude Team, use the **MCP Server URL for Claude Team** shown there, choose **No sign-in** authentication, and add a Request header named `authorization` with the copied value. This URL uses `?rest_route=%2Fmcp%2Fmcp-adapter-default-server`, which can preserve the Authorization header when the regular `/wp-json/mcp/...` path loses it in a web-server rewrite. It also avoids OAuth and `.well-known` discovery. Everyone using that connector shares the WordPress permissions of the user who generated the token.
 
 = Do I need WooCommerce or Gravity Forms installed? =
 
@@ -110,6 +118,11 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= 1.2.1 =
+* Added a revocable shared MCP Bearer token for Claude Team connections when OAuth discovery is blocked by the web server. The token uses the permissions of its WordPress creator and can be rotated or revoked from the MCP settings tab. (#47)
+* Added a query-routed MCP server URL for hosts where the `/wp-json/` rewrite drops the `authorization` header, and made the complete `Bearer chm_...` value copyable for Claude Team setup. (#47)
+* Split CloseHub settings into API and MCP tabs on single sites and multisite networks. (#47)
+
 = 1.2.0 =
 * Added WordPress Multilingual Plugin (WPML) support to MCP and REST content creation, including optional language assignment and translation-group linking. (#30)
 * Added MCP image uploads from base64 to the Media Library, with validation, quota checks, attachment metadata safeguards, and reuse as a post's featured image. (#40)
@@ -120,8 +133,6 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Added `POST /closehub/v1/elm-releases` to create an Easy License Manager release and update the product's WooCommerce download file in one call, unblocking automated premium-plugin releases. Accepts optional `tested`, `requires`, `requires_php`, and `upgrade_notice`. Preserves any other downloadable files already on the product instead of replacing them. Returns `503` if Easy License Manager is not active. (#19)
 * Added `PUT /closehub/v1/elm-releases/{id}` to update fields on an existing release (and its product's download file) without creating a duplicate release for the same version.
 * Fixed a crash on PHP 8+ when a route's numeric `id`/`product_id` argument was validated: `is_numeric` was registered directly as `validate_callback`, but WordPress calls it with 3 arguments and the internal function only accepts 1. Affected `/posts/{id}`, `/gravity-forms/forms/{id}`, and both new `elm-releases` routes.
-
-= Unreleased =
 
 = 1.1.2 =
 * Fixed MCP OAuth discovery on Apache-managed sites, including reliable handling of the protected-resource and authorization-server metadata routes after activation, URL changes, or regeneration. (#27)

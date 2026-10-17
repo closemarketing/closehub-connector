@@ -9,6 +9,9 @@ if ( is_multisite() ) {
 }
 
 require_once __DIR__ . '/includes/class-oauth.php';
+require_once __DIR__ . '/includes/class-mcp-token.php';
+
+CloseHub_MCP_Token::revoke();
 
 if ( is_multisite() ) {
 	// Each site's OAuth tables live under its own $wpdb->prefix — this

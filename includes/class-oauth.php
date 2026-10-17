@@ -335,7 +335,13 @@ class CloseHub_OAuth {
 		if ( '' === $header && is_user_logged_in() ) { return $result; }
 		// The Bearer auth scheme name is case-insensitive per RFC 6750/7235.
 		if ( ! preg_match( '/^Bearer\s+(\S+)$/i', $header, $matches ) ) { header( 'WWW-Authenticate: Bearer resource_metadata="' . esc_url( rest_url( self::NS . '/resource-metadata' ) ) . '"' ); return self::error( 'mcp_authentication_required', 'OAuth authentication is required.', 401 ); }
-		global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT user_id FROM ' . self::table( 'tokens' ) . ' WHERE access_hash = %s AND revoked = 0 AND expires_at > %s', self::hash( $matches[1] ), gmdate( 'Y-m-d H:i:s' ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$token = $matches[1];
+		if ( str_starts_with( $token, CloseHub_MCP_Token::PREFIX ) ) {
+			$user_id = CloseHub_MCP_Token::authenticate( $token );
+			if ( null === $user_id ) { return self::error( 'invalid_token', 'The access token is invalid or revoked.', 401 ); }
+			wp_set_current_user( $user_id ); return true;
+		}
+		global $wpdb; $row = $wpdb->get_row( $wpdb->prepare( 'SELECT user_id FROM ' . self::table( 'tokens' ) . ' WHERE access_hash = %s AND revoked = 0 AND expires_at > %s', self::hash( $token ), gmdate( 'Y-m-d H:i:s' ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		if ( ! $row ) { return self::error( 'invalid_token', 'The access token is invalid, expired, or revoked.', 401 ); }
 		wp_set_current_user( (int) $row['user_id'] ); return true;
 	}

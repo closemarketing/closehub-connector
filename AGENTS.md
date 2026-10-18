@@ -27,7 +27,7 @@ composer.json                   Dev stubs only (wordpress, woocommerce, gravity-
 phpstan.neon                    PHPStan config (level 5)
 .distignore                     Files excluded from the .zip release build
 includes/
-    class-api-key.php           Generate, store, verify, and regenerate the API key
+    class-api-key.php           Generate, store, verify, and regenerate the API key; also authenticates it as an MCP Bearer token
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/
     class-admin.php             Settings → CloseHub admin page
     class-oauth.php             MCP OAuth 2.1 + PKCE authorization server
@@ -71,7 +71,8 @@ Manages the `closehub_api_key` option. On a single-site install it lives in that
 - `maybe_generate()` — called on activation; only generates if no key exists yet
 - `get()` — returns current key, generates one if missing
 - `verify( $candidate )` — constant-time comparison via `hash_equals()`
-- `regenerate()` — generates a new key and overwrites the old one
+- `regenerate()` — generates a new key and overwrites the old one; records the current user as the MCP acting user (`closehub_api_key_user`)
+- `authenticate( $token )` / `get_user_id()` — MCP Bearer auth: returns the user the key acts as (last user to generate it, else the first administrator / super admin)
 
 Key format: `chk_` + 48 hex characters (`bin2hex( random_bytes( 24 ) )`). The storage backend (`stored()`/`persist()`) is the only thing that branches on `is_multisite()`; all public methods are identical for both cases.
 
@@ -81,7 +82,7 @@ Registers all routes on `rest_api_init`, same routes regardless of multisite. Ev
 
 ### `CloseHub_Admin` (`includes/class-admin.php`)
 
-On a single site, adds a page at **Settings → CloseHub** (`manage_options` capability required); the regenerate action uses a nonce (`closehub_regenerate_key`) and redirects with a `closehub_notice=regenerated` query param on success.
+On a single site, adds one page (no tabs) at **Settings → CloseHub** with the API key, endpoint, MCP URL, acting user, Claude Team steps, and an Advanced OAuth section (`manage_options` capability required); the regenerate action uses a nonce (`closehub_regenerate_key`) and redirects with a `closehub_notice=regenerated` query param on success.
 
 On multisite, the per-site Settings page is not registered at all — instead a **Network Admin → Settings → CloseHub** page is added (`manage_network_options` capability required), showing the single key shared by the whole network plus a table of every site in it. This avoids a non-super-admin site admin being able to view/regenerate the network-wide key. `register()` picks one branch or the other based on `is_multisite()`.
 

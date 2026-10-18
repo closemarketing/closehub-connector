@@ -336,8 +336,8 @@ class CloseHub_OAuth {
 		// The Bearer auth scheme name is case-insensitive per RFC 6750/7235.
 		if ( ! preg_match( '/^Bearer\s+(\S+)$/i', $header, $matches ) ) { header( 'WWW-Authenticate: Bearer resource_metadata="' . esc_url( rest_url( self::NS . '/resource-metadata' ) ) . '"' ); return self::error( 'mcp_authentication_required', 'OAuth authentication is required.', 401 ); }
 		$token = $matches[1];
-		if ( str_starts_with( $token, CloseHub_MCP_Token::PREFIX ) ) {
-			$user_id = CloseHub_MCP_Token::authenticate( $token );
+		if ( str_starts_with( $token, 'chk_' ) ) {
+			$user_id = CloseHub_API_Key::authenticate( $token );
 			if ( null === $user_id ) { return self::error( 'invalid_token', 'The access token is invalid or revoked.', 401 ); }
 			wp_set_current_user( $user_id ); return true;
 		}

@@ -4,15 +4,15 @@ defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
 if ( is_multisite() ) {
 	delete_site_option( 'closehub_api_key' );
+	delete_site_option( 'closehub_api_key_user' );
+	delete_site_option( 'closehub_mcp_shared_token' );
 } else {
 	delete_option( 'closehub_api_key' );
+	delete_option( 'closehub_api_key_user' );
+	delete_option( 'closehub_mcp_shared_token' );
 }
 
 require_once __DIR__ . '/includes/class-oauth.php';
-require_once __DIR__ . '/includes/class-mcp-token.php';
-
-CloseHub_MCP_Token::revoke();
-
 if ( is_multisite() ) {
 	// Each site's OAuth tables live under its own $wpdb->prefix — this
 	// uninstall entry point only runs in one blog's context, so every other

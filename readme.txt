@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.1
-Version: 1.2.1
+Stable tag: 1.3.0
+Version: 1.3.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -118,7 +118,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= Unreleased =
+= 1.3.0 =
 * Simplified settings into a single page: the CloseHub API key now also authenticates MCP (Claude Team) as a Bearer token, acting as the user who last generated it. The separate `chm_` shared token and the API/MCP tabs were removed; Claude Team connectors using a `chm_` token must be updated to use the API key.
 
 = 1.2.1 =

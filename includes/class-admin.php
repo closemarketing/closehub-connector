@@ -177,8 +177,10 @@ class CloseHub_Admin {
 	/** Render a read-only value with a Copy button. */
 	private function render_copy( string $value, string $label = '' ): void {
 		?>
-		<code><?php echo esc_html( '' !== $label ? $label : $value ); ?></code>
-		<button type="button" class="button button-small" data-closehub-copy="<?php echo esc_attr( $value ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+		<span class="closehub-copy">
+			<code><?php echo esc_html( '' !== $label ? $label : $value ); ?></code>
+			<button type="button" class="button button-small" data-closehub-copy="<?php echo esc_attr( $value ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+		</span>
 		<?php
 	}
 
@@ -332,6 +334,9 @@ class CloseHub_Admin {
 			</div>
 		</div>
 		<style>
+			.closehub-copy { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; vertical-align: middle; }
+			.closehub-copy code { margin: 0; word-break: break-all; }
+			.closehub-copy .button { margin: 0; }
 			.closehub-accordion { margin-top: 36px; border-top: 1px solid #dcdcde; max-width: 860px; }
 			.closehub-accordion details { border-bottom: 1px solid #dcdcde; }
 			.closehub-accordion summary { display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none; font-size: 14px; color: #1d2327; }

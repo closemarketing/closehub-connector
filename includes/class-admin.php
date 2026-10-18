@@ -6,10 +6,13 @@ class CloseHub_Admin {
 	private const ENDPOINTS = [
 		[ 'GET', '/closehub/v1/ping' ],
 		[ 'POST', '/closehub/v1/posts' ],
+		[ 'PUT', '/closehub/v1/posts/{id}' ],
 		[ 'GET', '/closehub/v1/woocommerce/orders' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}/entries' ],
+		[ 'POST', '/closehub/v1/elm-releases' ],
+		[ 'PUT', '/closehub/v1/elm-releases/{id}' ],
 	];
 
 	public function register(): void {
@@ -219,6 +222,10 @@ class CloseHub_Admin {
 						<button type="button" class="button" data-closehub-copy="<?php echo esc_attr( $api_key ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
 						<p class="description"><?php esc_html_e( 'Used by CloseHub and by Claude Team. Keep it secret — anyone with it can manage this site.', 'closehub-connector' ); ?></p>
 					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Site URL', 'closehub-connector' ); ?></th>
+					<td><?php $this->render_copy( $base_url ); ?></td>
 				</tr>
 				<tr>
 					<th scope="row"><?php esc_html_e( 'CloseHub endpoint', 'closehub-connector' ); ?></th>

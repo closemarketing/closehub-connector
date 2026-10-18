@@ -60,6 +60,8 @@ $key    = 'chk_' . str_repeat( 'a', 48 );
 closehub_test_assert( false !== strpos( $output, 'One API key connects both' ), 'The single-key intro is missing.' );
 closehub_test_assert( false !== strpos( $output, 'type="password" id="closehub-api-key" value="' . $key . '"' ), 'The API key must be masked by default.' );
 closehub_test_assert( false !== strpos( $output, 'data-closehub-copy="Bearer ' . $key . '"' ), 'The complete Bearer header value must be copyable.' );
+closehub_test_assert( false !== strpos( $output, 'data-closehub-copy="https://example.test"' ), 'The copyable Site URL is missing.' );
+closehub_test_assert( false !== strpos( $output, '/closehub/v1/elm-releases/{id}' ) && false !== strpos( $output, '/closehub/v1/posts/{id}' ), 'All REST endpoints must be listed.' );
 closehub_test_assert( false !== strpos( $output, 'https://example.test/wp-json/closehub/v1/' ), 'The CloseHub endpoint is missing.' );
 closehub_test_assert( false !== strpos( $output, CloseHub_Admin::get_mcp_server_query_url() ), 'The MCP server URL is missing.' );
 closehub_test_assert( false !== strpos( $output, 'davidperez' ), 'The acting user is missing.' );

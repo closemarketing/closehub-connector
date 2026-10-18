@@ -264,58 +264,82 @@ class CloseHub_Admin {
 				<?php submit_button( __( 'Regenerate Key', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
 			</form>
 
-			<hr />
-
-			<details>
-				<summary><strong><?php esc_html_e( 'What’s available', 'closehub-connector' ); ?></strong> <span class="description">— <?php echo esc_html( sprintf( /* translators: 1: endpoints, 2: abilities. */ __( '%1$d endpoints · %2$d abilities', 'closehub-connector' ), count( self::ENDPOINTS ), $abilities ) ); ?></span></summary>
-				<h3><?php esc_html_e( 'REST endpoints — CloseHub', 'closehub-connector' ); ?></h3>
-				<ul>
-					<?php foreach ( self::ENDPOINTS as $endpoint ) : ?>
-						<li><code><?php echo esc_html( $endpoint[0] ); ?></code> <code><?php echo esc_html( $endpoint[1] ); ?></code></li>
-					<?php endforeach; ?>
-				</ul>
-				<h3><?php esc_html_e( 'MCP abilities — Claude', 'closehub-connector' ); ?></h3>
-				<?php $this->render_abilities_status(); ?>
-			</details>
-
-			<details>
-				<summary><strong><?php esc_html_e( 'Advanced: OAuth connection', 'closehub-connector' ); ?></strong> <span class="description">— <?php esc_html_e( 'Only if you prefer per-user sign-in', 'closehub-connector' ); ?></span></summary>
-				<p><?php esc_html_e( 'Each Claude user signs in with their own WordPress account instead of the shared API key. In Claude choose “Always required” and “Use Anthropic’s hosted client metadata”.', 'closehub-connector' ); ?></p>
-				<p><?php $this->render_copy( self::get_mcp_server_url() ); ?></p>
-				<p class="description"><?php esc_html_e( 'If OAuth discovery fails because the server handles .well-known requests itself:', 'closehub-connector' ); ?></p>
-				<?php if ( $managed ) : ?>
-					<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Managed OAuth Discovery is enabled.', 'closehub-connector' ); ?></p>
-				<?php else : ?>
-					<form method="post" style="display:inline-block">
-						<?php wp_nonce_field( 'closehub_enable_managed_oauth_discovery' ); ?>
-						<input type="hidden" name="closehub_enable_managed_oauth_discovery" value="1" />
-						<?php submit_button( __( 'Enable managed discovery (Apache)', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-					</form>
-				<?php endif; ?>
-				<form method="post" style="display:inline-block">
-					<?php wp_nonce_field( 'closehub_regenerate_oauth_metadata' ); ?>
-					<input type="hidden" name="closehub_regenerate_oauth_metadata" value="1" />
-					<?php submit_button( __( 'Regenerate OAuth metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-				</form>
-			</details>
-
-			<?php if ( $network ) : ?>
+			<div class="closehub-accordion">
 				<details>
-					<summary><strong><?php esc_html_e( 'Sites in this Network', 'closehub-connector' ); ?></strong></summary>
-					<table class="widefat striped" style="max-width:700px">
-						<thead><tr><th><?php esc_html_e( 'Site ID', 'closehub-connector' ); ?></th><th><?php esc_html_e( 'URL', 'closehub-connector' ); ?></th></tr></thead>
-						<tbody>
-							<?php foreach ( get_sites( [ 'number' => 0 ] ) as $site ) : ?>
-								<tr>
-									<td><?php echo (int) $site->blog_id; ?></td>
-									<td><code><?php echo esc_html( get_home_url( (int) $site->blog_id ) ); ?></code></td>
-								</tr>
+					<summary><span class="closehub-title"><?php esc_html_e( 'What’s available', 'closehub-connector' ); ?></span><span class="closehub-meta"><?php echo esc_html( sprintf( /* translators: 1: endpoints, 2: abilities. */ __( '%1$d endpoints · %2$d abilities', 'closehub-connector' ), count( self::ENDPOINTS ), $abilities ) ); ?></span></summary>
+					<div class="closehub-panel closehub-columns">
+						<div>
+							<p><strong><?php esc_html_e( 'REST endpoints', 'closehub-connector' ); ?></strong> <span class="description">— CloseHub</span></p>
+							<?php foreach ( self::ENDPOINTS as $endpoint ) : ?>
+								<p class="closehub-endpoint"><code class="closehub-method"><?php echo esc_html( $endpoint[0] ); ?></code> <code><?php echo esc_html( $endpoint[1] ); ?></code></p>
 							<?php endforeach; ?>
-						</tbody>
-					</table>
+						</div>
+						<div>
+							<p><strong><?php esc_html_e( 'MCP abilities', 'closehub-connector' ); ?></strong> <span class="description">— Claude</span></p>
+							<?php $this->render_abilities_status(); ?>
+						</div>
+					</div>
 				</details>
-			<?php endif; ?>
+
+				<details>
+					<summary><span class="closehub-title"><?php esc_html_e( 'Advanced: OAuth connection', 'closehub-connector' ); ?></span><span class="closehub-meta"><?php esc_html_e( 'Only if you prefer per-user sign-in', 'closehub-connector' ); ?></span></summary>
+					<div class="closehub-panel">
+						<p><?php esc_html_e( 'Each Claude user signs in with their own WordPress account instead of the shared API key. In Claude choose “Always required” and “Use Anthropic’s hosted client metadata”.', 'closehub-connector' ); ?></p>
+						<p><?php $this->render_copy( self::get_mcp_server_url() ); ?></p>
+						<p class="description"><?php esc_html_e( 'If OAuth discovery fails because the server handles .well-known requests itself:', 'closehub-connector' ); ?></p>
+						<?php if ( $managed ) : ?>
+							<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Managed OAuth Discovery is enabled.', 'closehub-connector' ); ?></p>
+						<?php else : ?>
+							<form method="post" style="display:inline-block">
+								<?php wp_nonce_field( 'closehub_enable_managed_oauth_discovery' ); ?>
+								<input type="hidden" name="closehub_enable_managed_oauth_discovery" value="1" />
+								<?php submit_button( __( 'Enable managed discovery (Apache)', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+							</form>
+						<?php endif; ?>
+						<form method="post" style="display:inline-block">
+							<?php wp_nonce_field( 'closehub_regenerate_oauth_metadata' ); ?>
+							<input type="hidden" name="closehub_regenerate_oauth_metadata" value="1" />
+							<?php submit_button( __( 'Regenerate OAuth metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+						</form>
+					</div>
+				</details>
+
+				<?php if ( $network ) : ?>
+					<details>
+						<summary><span class="closehub-title"><?php esc_html_e( 'Sites in this Network', 'closehub-connector' ); ?></span></summary>
+						<div class="closehub-panel">
+							<table class="widefat striped" style="max-width:700px">
+								<thead><tr><th><?php esc_html_e( 'Site ID', 'closehub-connector' ); ?></th><th><?php esc_html_e( 'URL', 'closehub-connector' ); ?></th></tr></thead>
+								<tbody>
+									<?php foreach ( get_sites( [ 'number' => 0 ] ) as $site ) : ?>
+										<tr>
+											<td><?php echo (int) $site->blog_id; ?></td>
+											<td><code><?php echo esc_html( get_home_url( (int) $site->blog_id ) ); ?></code></td>
+										</tr>
+									<?php endforeach; ?>
+								</tbody>
+							</table>
+						</div>
+					</details>
+				<?php endif; ?>
+			</div>
 		</div>
+		<style>
+			.closehub-accordion { margin-top: 36px; border-top: 1px solid #dcdcde; max-width: 860px; }
+			.closehub-accordion details { border-bottom: 1px solid #dcdcde; }
+			.closehub-accordion summary { display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none; font-size: 14px; color: #1d2327; }
+			.closehub-accordion summary::-webkit-details-marker { display: none; }
+			.closehub-accordion summary::before { content: "\25B8"; width: 12px; color: #646970; }
+			.closehub-accordion details[open] > summary::before { content: "\25BE"; }
+			.closehub-title { flex: 1; font-weight: 600; }
+			.closehub-meta { color: #646970; font-size: 13px; }
+			.closehub-panel { padding: 4px 0 20px; }
+			.closehub-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+			.closehub-columns p { margin: 0 0 6px; }
+			.closehub-endpoint { display: flex; gap: 8px; align-items: baseline; }
+			.closehub-method { width: 34px; text-align: center; flex-shrink: 0; font-size: 11px; }
+			.closehub-chip { display: inline-block; margin: 0 6px 6px 0; padding: 2px 6px; font-size: 12px; background: #fff; border: 1px solid #dcdcde; border-radius: 3px; }
+		</style>
 		<script>
 		document.addEventListener( 'click', function ( event ) {
 			var copy = event.target.closest( '[data-closehub-copy]' );
@@ -392,15 +416,9 @@ class CloseHub_Admin {
 			return;
 		}
 
-		echo '<p class="description">';
-		printf(
-			/* translators: %d: number of registered abilities. */
-			esc_html( _n( '%d ability registered.', '%d abilities registered.', count( $closehub ), 'closehub-connector' ) ),
-			count( $closehub )
-		);
-		echo '</p><p>';
+		echo '<p>';
 		foreach ( $closehub as $ability ) {
-			echo '<code title="' . esc_attr( $ability->get_name() ) . '">' . esc_html( $ability->get_label() ) . '</code> ';
+			echo '<span class="closehub-chip" title="' . esc_attr( $ability->get_name() ) . '">' . esc_html( $ability->get_label() ) . '</span>';
 		}
 		echo '</p>';
 	}

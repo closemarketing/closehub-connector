@@ -103,7 +103,8 @@ class CloseHub_Test_WPDB {
 define( 'ARRAY_A', 'ARRAY_A' );
 $wpdb = new CloseHub_Test_WPDB();
 
-require_once dirname( __DIR__ ) . '/includes/class-mcp-token.php';
+function get_current_user_id(): int { return 7; }
+require_once dirname( __DIR__ ) . '/includes/class-api-key.php';
 require_once dirname( __DIR__ ) . '/includes/class-oauth.php';
 
 function closehub_test_assert( bool $condition, string $message ): void {
@@ -284,19 +285,18 @@ foreach ( [ 'Bearer', 'bearer', 'BEARER', 'BeArEr' ] as $scheme ) {
 }
 closehub_test_assert( 0 === preg_match( '/^Bearer\s+(\S+)$/i', 'Basic abc123' ), 'A non-Bearer scheme must not match.' );
 
-// A fixed Claude Team token authenticates only the exact MCP endpoint and
-// maps to the WordPress user that generated it, without an OAuth DB lookup.
-$shared_token = CloseHub_MCP_Token::generate( 7 );
+// The API key authenticates MCP requests as the WordPress user that
+// generated it, without an OAuth DB lookup.
+$shared_token = CloseHub_API_Key::regenerate();
 $_GET = [];
 $_SERVER['REQUEST_URI'] = '/wp-json/mcp/mcp-adapter-default-server';
 $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer ' . $shared_token;
-closehub_test_assert( true === CloseHub_OAuth::authenticate( null ), 'A valid shared MCP token must authenticate.' );
-closehub_test_assert( 7 === $GLOBALS['closehub_test_current_user'], 'A shared MCP token must set its mapped WordPress user.' );
+closehub_test_assert( true === CloseHub_OAuth::authenticate( null ), 'A valid API key must authenticate MCP requests.' );
+closehub_test_assert( 7 === $GLOBALS['closehub_test_current_user'], 'The API key must set its mapped WordPress user.' );
 
-$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer chm_' . str_repeat( '0', 64 );
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer chk_' . str_repeat( '0', 48 );
 $invalid_shared_token = CloseHub_OAuth::authenticate( null );
-closehub_test_assert( $invalid_shared_token instanceof WP_Error && 'invalid_token' === $invalid_shared_token->get_error_code(), 'An invalid shared MCP token must return invalid_token.' );
-CloseHub_MCP_Token::revoke();
+closehub_test_assert( $invalid_shared_token instanceof WP_Error && 'invalid_token' === $invalid_shared_token->get_error_code(), 'An invalid API key must return invalid_token.' );
 unset( $_SERVER['HTTP_AUTHORIZATION'], $GLOBALS['closehub_test_current_user'] );
 $_GET = [];
 $_SERVER = [];

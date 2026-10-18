@@ -3,8 +3,14 @@
 defined( 'ABSPATH' ) || exit;
 
 class CloseHub_Admin {
-	private string $new_mcp_token = '';
-	private string $mcp_token_notice = '';
+	private const ENDPOINTS = [
+		[ 'GET', '/closehub/v1/ping' ],
+		[ 'POST', '/closehub/v1/posts' ],
+		[ 'GET', '/closehub/v1/woocommerce/orders' ],
+		[ 'GET', '/closehub/v1/gravity-forms/forms' ],
+		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}' ],
+		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}/entries' ],
+	];
 
 	public function register(): void {
 		if ( is_multisite() ) {
@@ -12,7 +18,6 @@ class CloseHub_Admin {
 			add_action( 'admin_init', [ $this, 'handle_network_regenerate' ] );
 			add_action( 'admin_init', [ $this, 'handle_network_regenerate_oauth_metadata' ] );
 			add_action( 'admin_init', [ $this, 'handle_network_enable_managed_oauth_discovery' ] );
-			add_action( 'admin_init', [ $this, 'handle_mcp_token' ] );
 			return;
 		}
 
@@ -20,38 +25,6 @@ class CloseHub_Admin {
 		add_action( 'admin_init', [ $this, 'handle_regenerate' ] );
 		add_action( 'admin_init', [ $this, 'handle_regenerate_oauth_metadata' ] );
 		add_action( 'admin_init', [ $this, 'handle_enable_managed_oauth_discovery' ] );
-		add_action( 'admin_init', [ $this, 'handle_mcp_token' ] );
-	}
-
-	/** Generate, rotate, or revoke the shared MCP token. */
-	public function handle_mcp_token(): void {
-		if ( ! isset( $_POST['closehub_mcp_token_action'] ) ) {
-			return;
-		}
-
-		$capability = is_multisite() ? 'manage_network_options' : 'manage_options';
-		if ( ( is_multisite() && ! is_network_admin() ) || ! current_user_can( $capability ) ) {
-			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
-		}
-
-		check_admin_referer( 'closehub_manage_mcp_token' );
-		$action = sanitize_key( wp_unslash( (string) $_POST['closehub_mcp_token_action'] ) );
-		if ( 'revoke' === $action ) {
-			$this->mcp_token_notice = CloseHub_MCP_Token::revoke() ? 'revoked' : 'revoke_failed';
-			return;
-		}
-		if ( 'generate' !== $action ) {
-			return;
-		}
-
-		$token = CloseHub_MCP_Token::generate( get_current_user_id() );
-		if ( false === $token ) {
-			$this->mcp_token_notice = 'failed';
-			return;
-		}
-
-		$this->new_mcp_token    = $token;
-		$this->mcp_token_notice = 'generated';
 	}
 
 	public function add_menu(): void {
@@ -62,169 +35,6 @@ class CloseHub_Admin {
 			'closehub-connector',
 			[ $this, 'render_page' ]
 		);
-	}
-
-	private static function current_tab(): string {
-		$tab = isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'api'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- navigation only.
-		return 'mcp' === $tab ? 'mcp' : 'api';
-	}
-
-	private static function settings_url( string $tab, bool $network = false ): string {
-		$base_url = $network ? network_admin_url( 'settings.php?page=closehub-connector' ) : menu_page_url( 'closehub-connector', false );
-		return add_query_arg( 'tab', $tab, $base_url );
-	}
-
-	private function render_tabs( string $current_tab, bool $network = false ): void {
-		$tabs = [
-			'api' => __( 'API', 'closehub-connector' ),
-			'mcp' => __( 'MCP', 'closehub-connector' ),
-		];
-		?>
-		<nav class="nav-tab-wrapper" aria-label="<?php echo esc_attr( __( 'CloseHub settings', 'closehub-connector' ) ); ?>">
-			<?php foreach ( $tabs as $tab => $label ) : ?>
-				<a href="<?php echo esc_url( self::settings_url( $tab, $network ) ); ?>" class="nav-tab<?php echo $current_tab === $tab ? ' nav-tab-active' : ''; ?>"<?php echo $current_tab === $tab ? ' aria-current="page"' : ''; ?>><?php echo esc_html( $label ); ?></a>
-			<?php endforeach; ?>
-		</nav>
-		<?php
-	}
-
-	public function handle_regenerate(): void {
-		if ( ! isset( $_POST['closehub_regenerate'] ) ) {
-			return;
-		}
-		check_admin_referer( 'closehub_regenerate_key' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
-		}
-		CloseHub_API_Key::regenerate();
-		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url( 'api' ) ) );
-		exit;
-	}
-
-	/** Regenerate the static OAuth discovery documents for this site. */
-	public function handle_regenerate_oauth_metadata(): void {
-		if ( ! isset( $_POST['closehub_regenerate_oauth_metadata'] ) ) {
-			return;
-		}
-		check_admin_referer( 'closehub_regenerate_oauth_metadata' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
-		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp' ) ) ) {
-			return;
-		}
-		$notice = CloseHub_OAuth::ensure_well_known_files() ? 'oauth_metadata_regenerated' : 'oauth_metadata_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp' ) ) );
-		exit;
-	}
-
-	/** Enable the Apache-only dynamic OAuth discovery mode. */
-	public function handle_enable_managed_oauth_discovery(): void {
-		if ( ! isset( $_POST['closehub_enable_managed_oauth_discovery'] ) ) {
-			return;
-		}
-		check_admin_referer( 'closehub_enable_managed_oauth_discovery' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
-		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp' ), 'closehub_enable_managed_oauth_discovery' ) ) {
-			return;
-		}
-		$notice = CloseHub_OAuth::enable_managed_discovery() ? 'managed_oauth_discovery_enabled' : 'managed_oauth_discovery_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp' ) ) );
-		exit;
-	}
-
-	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			return;
-		}
-
-		$api_key  = CloseHub_API_Key::get();
-		$site_url = get_site_url();
-		$notice   = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
-		$tab      = self::current_tab();
-		?>
-		<div class="wrap">
-			<h1><?php esc_html_e( 'CloseHub Connector', 'closehub-connector' ); ?></h1>
-			<?php $this->render_tabs( $tab ); ?>
-
-			<?php if ( 'api' === $tab ) : ?>
-
-			<?php if ( 'regenerated' === $notice ) : ?>
-				<div class="notice notice-success is-dismissible">
-					<p><?php esc_html_e( 'API key regenerated successfully.', 'closehub-connector' ); ?></p>
-				</div>
-			<?php endif; ?>
-
-			<p><?php esc_html_e( 'Use the credentials below to connect CloseHub to this WordPress site.', 'closehub-connector' ); ?></p>
-
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Site URL', 'closehub-connector' ); ?></th>
-					<td>
-						<code><?php echo esc_html( $site_url ); ?></code>
-						<button type="button" class="button button-small" onclick="navigator.clipboard.writeText('<?php echo esc_js( $site_url ); ?>')">
-							<?php esc_html_e( 'Copy', 'closehub-connector' ); ?>
-						</button>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><?php esc_html_e( 'API Key', 'closehub-connector' ); ?></th>
-					<td>
-						<input
-							type="text"
-							id="closehub-api-key"
-							value="<?php echo esc_attr( $api_key ); ?>"
-							class="regular-text"
-							readonly
-							style="font-family:monospace"
-						/>
-						<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-api-key').value)">
-							<?php esc_html_e( 'Copy', 'closehub-connector' ); ?>
-						</button>
-						<p class="description"><?php esc_html_e( 'Keep this key secret. Anyone with it can access your site data via CloseHub.', 'closehub-connector' ); ?></p>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><?php esc_html_e( 'API Endpoint', 'closehub-connector' ); ?></th>
-					<td>
-						<code><?php echo esc_html( $site_url . '/wp-json/closehub/v1/' ); ?></code>
-					</td>
-				</tr>
-			</table>
-
-			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
-			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one. You will need to update CloseHub with the new key.', 'closehub-connector' ); ?></p>
-			<form method="post">
-				<?php wp_nonce_field( 'closehub_regenerate_key' ); ?>
-				<input type="hidden" name="closehub_regenerate" value="1" />
-				<?php submit_button( __( 'Regenerate Key', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-			</form>
-
-			<h2><?php esc_html_e( 'Available Endpoints', 'closehub-connector' ); ?></h2>
-			<table class="widefat striped" style="max-width:700px">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'Method', 'closehub-connector' ); ?></th>
-						<th><?php esc_html_e( 'Endpoint', 'closehub-connector' ); ?></th>
-						<th><?php esc_html_e( 'Description', 'closehub-connector' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/ping</code></td><td><?php esc_html_e( 'Verify connection', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>POST</code></td><td><code>/closehub/v1/posts</code></td><td><?php esc_html_e( 'Create a post', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/woocommerce/orders</code></td><td><?php esc_html_e( 'Fetch orders (WooCommerce)', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms</code></td><td><?php esc_html_e( 'List forms (Gravity Forms)', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms/{id}</code></td><td><?php esc_html_e( 'Get form details', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms/{id}/entries</code></td><td><?php esc_html_e( 'Count form entries', 'closehub-connector' ); ?></td></tr>
-				</tbody>
-			</table>
-			<?php else : ?>
-				<?php $this->render_mcp_section(); ?>
-			<?php endif; ?>
-		</div>
-		<?php
 	}
 
 	public function add_network_menu(): void {
@@ -238,6 +48,23 @@ class CloseHub_Admin {
 		);
 	}
 
+	private static function settings_url( bool $network = false ): string {
+		return $network ? network_admin_url( 'settings.php?page=closehub-connector' ) : menu_page_url( 'closehub-connector', false );
+	}
+
+	public function handle_regenerate(): void {
+		if ( ! isset( $_POST['closehub_regenerate'] ) ) {
+			return;
+		}
+		check_admin_referer( 'closehub_regenerate_key' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
+		}
+		CloseHub_API_Key::regenerate();
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url() ) );
+		exit;
+	}
+
 	public function handle_network_regenerate(): void {
 		if ( ! is_network_admin() || ! isset( $_POST['closehub_regenerate'] ) ) {
 			return;
@@ -247,7 +74,41 @@ class CloseHub_Admin {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
 		CloseHub_API_Key::regenerate();
-		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url( 'api', true ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', 'regenerated', self::settings_url( true ) ) );
+		exit;
+	}
+
+	/** Regenerate the static OAuth discovery documents for this site. */
+	public function handle_regenerate_oauth_metadata(): void {
+		if ( ! isset( $_POST['closehub_regenerate_oauth_metadata'] ) ) {
+			return;
+		}
+		check_admin_referer( 'closehub_regenerate_oauth_metadata' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
+		}
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url() ) ) {
+			return;
+		}
+		$notice = CloseHub_OAuth::ensure_well_known_files() ? 'oauth_metadata_regenerated' : 'oauth_metadata_failed';
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url() ) );
+		exit;
+	}
+
+	/** Enable the Apache-only dynamic OAuth discovery mode. */
+	public function handle_enable_managed_oauth_discovery(): void {
+		if ( ! isset( $_POST['closehub_enable_managed_oauth_discovery'] ) ) {
+			return;
+		}
+		check_admin_referer( 'closehub_enable_managed_oauth_discovery' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
+		}
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url(), 'closehub_enable_managed_oauth_discovery' ) ) {
+			return;
+		}
+		$notice = CloseHub_OAuth::enable_managed_discovery() ? 'managed_oauth_discovery_enabled' : 'managed_oauth_discovery_failed';
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url() ) );
 		exit;
 	}
 
@@ -260,11 +121,11 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_network_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( 'mcp', true ) ) ) {
+		if ( ! CloseHub_OAuth::initialize_filesystem( self::settings_url( true ) ) ) {
 			return;
 		}
 		$notice = CloseHub_OAuth::ensure_well_known_files() ? 'oauth_metadata_regenerated' : 'oauth_metadata_failed';
-		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( 'mcp', true ) ) );
+		wp_safe_redirect( add_query_arg( 'closehub_notice', $notice, self::settings_url( true ) ) );
 		exit;
 	}
 
@@ -277,7 +138,7 @@ class CloseHub_Admin {
 		if ( ! current_user_can( 'manage_network_options' ) ) {
 			wp_die( esc_html__( 'Not allowed.', 'closehub-connector' ) );
 		}
-		$url = self::settings_url( 'mcp', true );
+		$url = self::settings_url( true );
 		if ( ! CloseHub_OAuth::initialize_filesystem( $url, 'closehub_enable_managed_oauth_discovery' ) ) {
 			return;
 		}
@@ -286,106 +147,16 @@ class CloseHub_Admin {
 		exit;
 	}
 
-	public function render_network_page(): void {
-		if ( ! current_user_can( 'manage_network_options' ) ) {
-			return;
+	public function render_page(): void {
+		if ( current_user_can( 'manage_options' ) ) {
+			$this->render_settings( false );
 		}
+	}
 
-		$api_key     = CloseHub_API_Key::get();
-		$network_url = network_site_url();
-		$notice      = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
-		$sites       = get_sites( [ 'number' => 0 ] );
-		$tab         = self::current_tab();
-		?>
-		<div class="wrap">
-			<h1><?php esc_html_e( 'CloseHub Connector', 'closehub-connector' ); ?></h1>
-			<?php $this->render_tabs( $tab, true ); ?>
-
-			<?php if ( 'api' === $tab ) : ?>
-
-			<?php if ( 'regenerated' === $notice ) : ?>
-				<div class="notice notice-success is-dismissible">
-					<p><?php esc_html_e( 'API key regenerated successfully.', 'closehub-connector' ); ?></p>
-				</div>
-			<?php endif; ?>
-
-			<p><?php esc_html_e( 'This key is shared by every site in the network. CloseHub authenticates once and the endpoints below automatically return combined results for all sites.', 'closehub-connector' ); ?></p>
-
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Network API Key', 'closehub-connector' ); ?></th>
-					<td>
-						<input
-							type="text"
-							id="closehub-api-key"
-							value="<?php echo esc_attr( $api_key ); ?>"
-							class="regular-text"
-							readonly
-							style="font-family:monospace"
-						/>
-						<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-api-key').value)">
-							<?php esc_html_e( 'Copy', 'closehub-connector' ); ?>
-						</button>
-						<p class="description"><?php esc_html_e( 'Keep this key secret. Anyone with it can access data across every site in this network via CloseHub.', 'closehub-connector' ); ?></p>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><?php esc_html_e( 'API Endpoint', 'closehub-connector' ); ?></th>
-					<td>
-						<code><?php echo esc_html( $network_url . '/wp-json/closehub/v1/' ); ?></code>
-					</td>
-				</tr>
-			</table>
-
-			<h2><?php esc_html_e( 'Regenerate API Key', 'closehub-connector' ); ?></h2>
-			<p><?php esc_html_e( 'Regenerating the key will immediately invalidate the current one for every site in the network.', 'closehub-connector' ); ?></p>
-			<form method="post">
-				<?php wp_nonce_field( 'closehub_regenerate_key' ); ?>
-				<input type="hidden" name="closehub_regenerate" value="1" />
-				<?php submit_button( __( 'Regenerate Key', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-			</form>
-
-			<h2><?php esc_html_e( 'Available Endpoints', 'closehub-connector' ); ?></h2>
-			<table class="widefat striped" style="max-width:700px">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'Method', 'closehub-connector' ); ?></th>
-						<th><?php esc_html_e( 'Endpoint', 'closehub-connector' ); ?></th>
-						<th><?php esc_html_e( 'Description', 'closehub-connector' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/ping</code></td><td><?php esc_html_e( 'Verify connection to every site', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>POST</code></td><td><code>/closehub/v1/posts</code></td><td><?php esc_html_e( 'Create a post on every site', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/woocommerce/orders</code></td><td><?php esc_html_e( 'Fetch orders for every site (WooCommerce)', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms</code></td><td><?php esc_html_e( 'List forms for every site (Gravity Forms)', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms/{id}</code></td><td><?php esc_html_e( 'Get form details for every site', 'closehub-connector' ); ?></td></tr>
-					<tr><td><code>GET</code></td><td><code>/closehub/v1/gravity-forms/forms/{id}/entries</code></td><td><?php esc_html_e( 'Count form entries for every site', 'closehub-connector' ); ?></td></tr>
-				</tbody>
-			</table>
-
-			<h2><?php esc_html_e( 'Sites in this Network', 'closehub-connector' ); ?></h2>
-			<table class="widefat striped" style="max-width:700px">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'Site ID', 'closehub-connector' ); ?></th>
-						<th><?php esc_html_e( 'URL', 'closehub-connector' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php foreach ( $sites as $site ) : ?>
-						<tr>
-							<td><?php echo (int) $site->blog_id; ?></td>
-							<td><code><?php echo esc_html( get_home_url( (int) $site->blog_id ) ); ?></code></td>
-						</tr>
-					<?php endforeach; ?>
-				</tbody>
-			</table>
-			<?php else : ?>
-				<?php $this->render_mcp_section(); ?>
-			<?php endif; ?>
-		</div>
-		<?php
+	public function render_network_page(): void {
+		if ( current_user_can( 'manage_network_options' ) ) {
+			$this->render_settings( true );
+		}
 	}
 
 	/**
@@ -400,22 +171,187 @@ class CloseHub_Admin {
 		return home_url( '/?rest_route=%2Fmcp%2Fmcp-adapter-default-server' );
 	}
 
-	/**
-	 * Render the MCP connection details shared by the site and network settings pages.
-	 */
-	private function render_mcp_section(): void {
-		$mcp_url           = self::get_mcp_server_url();
-		$adapter_available = class_exists( '\\WP\\MCP\\Plugin' );
-		$managed_discovery_enabled = CloseHub_OAuth::managed_discovery_is_enabled();
-		$metadata_needs_regeneration = ! $managed_discovery_enabled && CloseHub_OAuth::well_known_files_need_regeneration();
-		$notice = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : '';
-		$shared_token_user = get_user_by( 'id', CloseHub_MCP_Token::get_user_id() );
+	/** Render a read-only value with a Copy button. */
+	private function render_copy( string $value, string $label = '' ): void {
 		?>
-		<h2><?php esc_html_e( 'MCP', 'closehub-connector' ); ?></h2>
-		<?php if ( 'oauth_metadata_regenerated' === $notice ) : ?>
-			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'OAuth discovery metadata regenerated successfully.', 'closehub-connector' ); ?></p></div>
-		<?php endif; ?>
-		<?php if ( 'oauth_metadata_failed' === $notice ) : ?>
+		<code><?php echo esc_html( '' !== $label ? $label : $value ); ?></code>
+		<button type="button" class="button button-small" data-closehub-copy="<?php echo esc_attr( $value ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+		<?php
+	}
+
+	/**
+	 * Single settings screen: one API key used by CloseHub (REST) and Claude (MCP).
+	 */
+	private function render_settings( bool $network ): void {
+		$api_key      = CloseHub_API_Key::get();
+		$base_url     = $network ? network_site_url() : get_site_url();
+		$notice       = isset( $_GET['closehub_notice'] ) ? sanitize_key( $_GET['closehub_notice'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display only.
+		$acts_as      = get_user_by( 'id', CloseHub_API_Key::get_user_id() );
+		$abilities    = function_exists( 'wp_get_abilities' ) ? count( array_filter( wp_get_abilities(), static fn( $ability ) => str_starts_with( $ability->get_name(), 'closehub/' ) ) ) : 0;
+		$managed      = CloseHub_OAuth::managed_discovery_is_enabled();
+		$needs_regen  = ! $managed && CloseHub_OAuth::well_known_files_need_regeneration();
+		$mcp_url      = self::get_mcp_server_query_url();
+		?>
+		<div class="wrap">
+			<h1><?php esc_html_e( 'CloseHub Connector', 'closehub-connector' ); ?></h1>
+			<p>
+				<?php
+				echo esc_html(
+					$network
+						? __( 'One API key connects both the CloseHub app and Claude (MCP) to every site in this network.', 'closehub-connector' )
+						: __( 'One API key connects both the CloseHub app and Claude (MCP) to this site.', 'closehub-connector' )
+				);
+				?>
+			</p>
+
+			<?php $this->render_notices( $notice ); ?>
+			<?php if ( $needs_regen ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it under Advanced before connecting an OAuth MCP client.', 'closehub-connector' ); ?></p></div>
+			<?php endif; ?>
+
+			<h2><?php esc_html_e( 'Connection', 'closehub-connector' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="closehub-api-key"><?php esc_html_e( 'API Key', 'closehub-connector' ); ?></label></th>
+					<td>
+						<input type="password" id="closehub-api-key" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text code" readonly />
+						<button type="button" class="button" data-closehub-reveal="closehub-api-key" data-show="<?php echo esc_attr__( 'Show', 'closehub-connector' ); ?>" data-hide="<?php echo esc_attr__( 'Hide', 'closehub-connector' ); ?>"><?php esc_html_e( 'Show', 'closehub-connector' ); ?></button>
+						<button type="button" class="button" data-closehub-copy="<?php echo esc_attr( $api_key ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+						<p class="description"><?php esc_html_e( 'Used by CloseHub and by Claude Team. Keep it secret — anyone with it can manage this site.', 'closehub-connector' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'CloseHub endpoint', 'closehub-connector' ); ?></th>
+					<td><?php $this->render_copy( $base_url . '/wp-json/closehub/v1/' ); ?></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'MCP server URL', 'closehub-connector' ); ?></th>
+					<td>
+						<?php $this->render_copy( $mcp_url ); ?>
+						<?php if ( ! class_exists( '\\WP\\MCP\\Plugin' ) ) : ?>
+							<p class="description"><?php esc_html_e( 'The MCP Adapter is not available. Reinstall the plugin package to include its Composer dependencies.', 'closehub-connector' ); ?></p>
+						<?php endif; ?>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Acts as user', 'closehub-connector' ); ?></th>
+					<td>
+						<?php if ( $acts_as ) : ?>
+							<strong><?php echo esc_html( $acts_as->user_login ); ?></strong>
+							<span class="description">— <?php esc_html_e( 'MCP requests get this user’s capabilities.', 'closehub-connector' ); ?></span>
+						<?php else : ?>
+							<span class="description"><?php esc_html_e( 'No administrator found. Regenerate the key while logged in to assign one.', 'closehub-connector' ); ?></span>
+						<?php endif; ?>
+					</td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Connect Claude Team', 'closehub-connector' ); ?></h2>
+			<ol>
+				<li><?php echo wp_kses( __( 'In Claude, add a custom connector and paste the <strong>MCP server URL</strong>.', 'closehub-connector' ), [ 'strong' => [] ] ); ?></li>
+				<li><?php echo wp_kses( __( 'Set Authentication to <strong>No sign-in</strong>.', 'closehub-connector' ), [ 'strong' => [] ] ); ?></li>
+				<li>
+					<?php esc_html_e( 'Add a request header with your API key:', 'closehub-connector' ); ?>
+					<?php $this->render_copy( 'Bearer ' . $api_key, 'authorization: Bearer ' . substr( $api_key, 0, 8 ) . '…' ); ?>
+				</li>
+			</ol>
+
+			<h2><?php esc_html_e( 'Regenerate API key', 'closehub-connector' ); ?></h2>
+			<p><?php esc_html_e( 'The current key stops working immediately — CloseHub and every Claude user will be disconnected until you update them.', 'closehub-connector' ); ?></p>
+			<form method="post" data-closehub-confirm="<?php echo esc_attr__( 'Disconnect CloseHub and Claude now?', 'closehub-connector' ); ?>">
+				<?php wp_nonce_field( 'closehub_regenerate_key' ); ?>
+				<input type="hidden" name="closehub_regenerate" value="1" />
+				<?php submit_button( __( 'Regenerate Key', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+			</form>
+
+			<hr />
+
+			<details>
+				<summary><strong><?php esc_html_e( 'What’s available', 'closehub-connector' ); ?></strong> <span class="description">— <?php echo esc_html( sprintf( /* translators: 1: endpoints, 2: abilities. */ __( '%1$d endpoints · %2$d abilities', 'closehub-connector' ), count( self::ENDPOINTS ), $abilities ) ); ?></span></summary>
+				<h3><?php esc_html_e( 'REST endpoints — CloseHub', 'closehub-connector' ); ?></h3>
+				<ul>
+					<?php foreach ( self::ENDPOINTS as $endpoint ) : ?>
+						<li><code><?php echo esc_html( $endpoint[0] ); ?></code> <code><?php echo esc_html( $endpoint[1] ); ?></code></li>
+					<?php endforeach; ?>
+				</ul>
+				<h3><?php esc_html_e( 'MCP abilities — Claude', 'closehub-connector' ); ?></h3>
+				<?php $this->render_abilities_status(); ?>
+			</details>
+
+			<details>
+				<summary><strong><?php esc_html_e( 'Advanced: OAuth connection', 'closehub-connector' ); ?></strong> <span class="description">— <?php esc_html_e( 'Only if you prefer per-user sign-in', 'closehub-connector' ); ?></span></summary>
+				<p><?php esc_html_e( 'Each Claude user signs in with their own WordPress account instead of the shared API key. In Claude choose “Always required” and “Use Anthropic’s hosted client metadata”.', 'closehub-connector' ); ?></p>
+				<p><?php $this->render_copy( self::get_mcp_server_url() ); ?></p>
+				<p class="description"><?php esc_html_e( 'If OAuth discovery fails because the server handles .well-known requests itself:', 'closehub-connector' ); ?></p>
+				<?php if ( $managed ) : ?>
+					<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Managed OAuth Discovery is enabled.', 'closehub-connector' ); ?></p>
+				<?php else : ?>
+					<form method="post" style="display:inline-block">
+						<?php wp_nonce_field( 'closehub_enable_managed_oauth_discovery' ); ?>
+						<input type="hidden" name="closehub_enable_managed_oauth_discovery" value="1" />
+						<?php submit_button( __( 'Enable managed discovery (Apache)', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+					</form>
+				<?php endif; ?>
+				<form method="post" style="display:inline-block">
+					<?php wp_nonce_field( 'closehub_regenerate_oauth_metadata' ); ?>
+					<input type="hidden" name="closehub_regenerate_oauth_metadata" value="1" />
+					<?php submit_button( __( 'Regenerate OAuth metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
+				</form>
+			</details>
+
+			<?php if ( $network ) : ?>
+				<details>
+					<summary><strong><?php esc_html_e( 'Sites in this Network', 'closehub-connector' ); ?></strong></summary>
+					<table class="widefat striped" style="max-width:700px">
+						<thead><tr><th><?php esc_html_e( 'Site ID', 'closehub-connector' ); ?></th><th><?php esc_html_e( 'URL', 'closehub-connector' ); ?></th></tr></thead>
+						<tbody>
+							<?php foreach ( get_sites( [ 'number' => 0 ] ) as $site ) : ?>
+								<tr>
+									<td><?php echo (int) $site->blog_id; ?></td>
+									<td><code><?php echo esc_html( get_home_url( (int) $site->blog_id ) ); ?></code></td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</details>
+			<?php endif; ?>
+		</div>
+		<script>
+		document.addEventListener( 'click', function ( event ) {
+			var copy = event.target.closest( '[data-closehub-copy]' );
+			if ( copy ) {
+				navigator.clipboard.writeText( copy.getAttribute( 'data-closehub-copy' ) );
+				return;
+			}
+			var reveal = event.target.closest( '[data-closehub-reveal]' );
+			if ( reveal ) {
+				var input = document.getElementById( reveal.getAttribute( 'data-closehub-reveal' ) );
+				var show = 'password' === input.type;
+				input.type = show ? 'text' : 'password';
+				reveal.textContent = reveal.getAttribute( show ? 'data-hide' : 'data-show' );
+			}
+		} );
+		document.addEventListener( 'submit', function ( event ) {
+			var message = event.target.getAttribute( 'data-closehub-confirm' );
+			if ( message && ! window.confirm( message ) ) {
+				event.preventDefault();
+			}
+		} );
+		</script>
+		<?php
+	}
+
+	private function render_notices( string $notice ): void {
+		if ( 'regenerated' === $notice ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'New API key generated. Update it in CloseHub and in your Claude connector.', 'closehub-connector' ) . '</p></div>';
+		} elseif ( 'oauth_metadata_regenerated' === $notice ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'OAuth discovery metadata regenerated successfully.', 'closehub-connector' ) . '</p></div>';
+		} elseif ( 'managed_oauth_discovery_enabled' === $notice ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Managed OAuth discovery is enabled. Apache now routes OAuth discovery requests through WordPress.', 'closehub-connector' ) . '</p></div>';
+		} elseif ( 'managed_oauth_discovery_failed' === $notice ) {
+			echo '<div class="notice notice-error"><p>' . esc_html__( 'Managed OAuth discovery could not be enabled. Check the WordPress filesystem credentials and Apache rewrite permissions.', 'closehub-connector' ) . '</p></div>';
+		} elseif ( 'oauth_metadata_failed' === $notice ) {
+			?>
 			<div class="notice notice-error">
 				<p><?php esc_html_e( 'OAuth discovery metadata could not be written. Check that the web server can write to the public .well-known directory, or upload the files through FTP.', 'closehub-connector' ); ?></p>
 				<details>
@@ -427,131 +363,8 @@ class CloseHub_Admin {
 					<?php endforeach; ?>
 				</details>
 			</div>
-		<?php endif; ?>
-		<?php if ( 'managed_oauth_discovery_enabled' === $notice ) : ?>
-			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Managed OAuth discovery is enabled. Apache now routes OAuth discovery requests through WordPress.', 'closehub-connector' ); ?></p></div>
-		<?php endif; ?>
-		<?php if ( 'managed_oauth_discovery_failed' === $notice ) : ?>
-			<div class="notice notice-error"><p><?php esc_html_e( 'Managed OAuth discovery could not be enabled. Check the WordPress filesystem credentials and Apache rewrite permissions.', 'closehub-connector' ); ?></p></div>
-		<?php endif; ?>
-		<?php if ( $metadata_needs_regeneration ) : ?>
-			<div class="notice notice-warning"><p><?php esc_html_e( 'OAuth discovery metadata is missing, out of date, or cannot be updated. Regenerate it below before connecting an OAuth MCP client.', 'closehub-connector' ); ?></p></div>
-		<?php endif; ?>
-		<p><?php esc_html_e( 'Use this URL to connect an MCP client to this WordPress site.', 'closehub-connector' ); ?></p>
-		<table class="form-table" role="presentation">
-			<tr>
-				<th scope="row"><?php esc_html_e( 'MCP Server URL (OAuth)', 'closehub-connector' ); ?></th>
-				<td>
-					<input
-						type="text"
-						id="closehub-mcp-server-url"
-						value="<?php echo esc_attr( $mcp_url ); ?>"
-						class="large-text code"
-						readonly
-					/>
-					<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-server-url').value)">
-						<?php esc_html_e( 'Copy', 'closehub-connector' ); ?>
-					</button>
-					<p class="description">
-						<?php
-						if ( $adapter_available ) {
-							esc_html_e( 'The MCP Adapter is available. Authenticate with a WordPress user account that has the required capabilities.', 'closehub-connector' );
-						} else {
-							esc_html_e( 'The MCP Adapter is not available. Reinstall the plugin package to include its Composer dependencies.', 'closehub-connector' );
-						}
-						?>
-					</p>
-					<p class="description">
-						<?php esc_html_e( 'When adding this server in Claude, select “Always required” for Authentication and “Use Anthropic’s hosted client metadata” for OAuth client.', 'closehub-connector' ); ?>
-					</p>
-				</td>
-			</tr>
-		</table>
-		<h3><?php esc_html_e( 'Claude Team Shared Token', 'closehub-connector' ); ?></h3>
-		<p><?php esc_html_e( 'Use a shared Bearer token when Nginx blocks OAuth discovery. This connection does not use .well-known URLs or an OAuth Client ID.', 'closehub-connector' ); ?></p>
-		<p><label for="closehub-mcp-query-url"><strong><?php esc_html_e( 'MCP Server URL for Claude Team', 'closehub-connector' ); ?></strong></label></p>
-		<p>
-			<input type="text" id="closehub-mcp-query-url" value="<?php echo esc_attr( self::get_mcp_server_query_url() ); ?>" class="large-text code" readonly />
-			<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-query-url').value)"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
-		</p>
-		<p class="description"><?php esc_html_e( 'Use this URL with the shared token if the regular MCP URL returns an authentication error.', 'closehub-connector' ); ?></p>
-		<?php if ( 'generated' === $this->mcp_token_notice ) : ?>
-			<div class="notice notice-success"><p><?php esc_html_e( 'Shared MCP token generated. Copy it now; WordPress stores only its hash and cannot show it again.', 'closehub-connector' ); ?></p></div>
-		<?php elseif ( 'revoked' === $this->mcp_token_notice ) : ?>
-			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Shared MCP token revoked.', 'closehub-connector' ); ?></p></div>
-		<?php elseif ( 'revoke_failed' === $this->mcp_token_notice ) : ?>
-			<div class="notice notice-error"><p><?php esc_html_e( 'The shared MCP token could not be revoked. It may still be active; please try again.', 'closehub-connector' ); ?></p></div>
-		<?php elseif ( 'failed' === $this->mcp_token_notice ) : ?>
-			<div class="notice notice-error"><p><?php esc_html_e( 'The shared MCP token could not be saved.', 'closehub-connector' ); ?></p></div>
-		<?php endif; ?>
-		<?php if ( '' !== $this->new_mcp_token ) : ?>
-			<p><label for="closehub-mcp-shared-token"><strong><?php esc_html_e( 'authorization header value', 'closehub-connector' ); ?></strong></label></p>
-			<p>
-				<input type="text" id="closehub-mcp-shared-token" value="<?php echo esc_attr( 'Bearer ' . $this->new_mcp_token ); ?>" class="large-text code" readonly />
-				<button type="button" class="button button-small" onclick="navigator.clipboard.writeText(document.getElementById('closehub-mcp-shared-token').value)"><?php esc_html_e( 'Copy header value', 'closehub-connector' ); ?></button>
-			</p>
-		<?php endif; ?>
-		<?php if ( $shared_token_user && CloseHub_MCP_Token::is_configured() ) : ?>
-			<p>
-				<?php
-				printf(
-					/* translators: %s: WordPress username. */
-					esc_html__( 'The shared token acts as WordPress user %s and receives that user’s capabilities.', 'closehub-connector' ),
-					esc_html( $shared_token_user->user_login )
-				);
-				?>
-			</p>
-			<ol>
-				<li><?php esc_html_e( 'In Claude Team, choose “No sign-in” for Authentication.', 'closehub-connector' ); ?></li>
-				<li><?php esc_html_e( 'Add a Request header named authorization.', 'closehub-connector' ); ?></li>
-				<li>
-					<?php
-					if ( '' !== $this->new_mcp_token ) {
-						esc_html_e( 'Copy the complete header value shown above, including Bearer and the following space.', 'closehub-connector' );
-					} else {
-						esc_html_e( 'Use the complete Bearer value you copied when the token was generated.', 'closehub-connector' );
-					}
-					?>
-				</li>
-			</ol>
-			<p><code>authorization: Bearer chm_…</code></p>
-		<?php else : ?>
-			<p><?php esc_html_e( 'No shared MCP token is configured.', 'closehub-connector' ); ?></p>
-		<?php endif; ?>
-		<form method="post" style="display:inline-block;margin-right:8px">
-			<?php wp_nonce_field( 'closehub_manage_mcp_token' ); ?>
-			<button type="submit" class="button button-secondary" name="closehub_mcp_token_action" value="generate">
-				<?php echo esc_html( CloseHub_MCP_Token::is_configured() ? __( 'Regenerate Shared Token', 'closehub-connector' ) : __( 'Generate Shared Token', 'closehub-connector' ) ); ?>
-			</button>
-		</form>
-		<?php if ( CloseHub_MCP_Token::is_configured() ) : ?>
-			<form method="post" style="display:inline-block">
-				<?php wp_nonce_field( 'closehub_manage_mcp_token' ); ?>
-				<button type="submit" class="button button-link-delete" name="closehub_mcp_token_action" value="revoke"><?php esc_html_e( 'Revoke Shared Token', 'closehub-connector' ); ?></button>
-			</form>
-			<p class="description"><?php esc_html_e( 'Regenerating or revoking the token immediately disconnects every Claude user sharing it.', 'closehub-connector' ); ?></p>
-		<?php endif; ?>
-		<h3><?php esc_html_e( 'Registered Abilities', 'closehub-connector' ); ?></h3>
-		<?php $this->render_abilities_status(); ?>
-		<h3><?php esc_html_e( 'OAuth Discovery Metadata', 'closehub-connector' ); ?></h3>
-		<h4><?php esc_html_e( 'Managed OAuth Discovery (Apache)', 'closehub-connector' ); ?></h4>
-		<p><?php esc_html_e( 'Use this mode when Apache serves .well-known requests before WordPress. It adds a limited rule for the two OAuth metadata paths while preserving the existing .htaccess contents.', 'closehub-connector' ); ?></p>
-		<?php if ( $managed_discovery_enabled ) : ?>
-			<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Managed OAuth Discovery is enabled.', 'closehub-connector' ); ?></p>
-		<?php else : ?>
-			<form method="post">
-				<?php wp_nonce_field( 'closehub_enable_managed_oauth_discovery' ); ?>
-				<input type="hidden" name="closehub_enable_managed_oauth_discovery" value="1" />
-				<?php submit_button( __( 'Enable Managed OAuth Discovery', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-			</form>
-		<?php endif; ?>
-		<p><?php esc_html_e( 'Regenerate the .well-known OAuth metadata files when your web server serves them directly instead of routing them through WordPress.', 'closehub-connector' ); ?></p>
-		<form method="post">
-			<?php wp_nonce_field( 'closehub_regenerate_oauth_metadata' ); ?>
-			<input type="hidden" name="closehub_regenerate_oauth_metadata" value="1" />
-			<?php submit_button( __( 'Regenerate OAuth Metadata', 'closehub-connector' ), 'secondary', 'submit', false ); ?>
-		</form>
-		<?php
+			<?php
+		}
 	}
 
 	/**
@@ -579,18 +392,16 @@ class CloseHub_Admin {
 			return;
 		}
 
-		echo '<p><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> ';
+		echo '<p class="description">';
 		printf(
 			/* translators: %d: number of registered abilities. */
 			esc_html( _n( '%d ability registered.', '%d abilities registered.', count( $closehub ), 'closehub-connector' ) ),
 			count( $closehub )
 		);
-		echo '</p>';
-
-		echo '<ul style="list-style:disc;margin-left:20px">';
+		echo '</p><p>';
 		foreach ( $closehub as $ability ) {
-			echo '<li><code>' . esc_html( $ability->get_name() ) . '</code> — ' . esc_html( $ability->get_label() ) . '</li>';
+			echo '<code title="' . esc_attr( $ability->get_name() ) . '">' . esc_html( $ability->get_label() ) . '</code> ';
 		}
-		echo '</ul>';
+		echo '</p>';
 	}
 }

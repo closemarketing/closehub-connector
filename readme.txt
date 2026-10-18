@@ -77,7 +77,7 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 1. Upload the `closehub-connector` folder to `/wp-content/plugins/`.
 2. Activate the plugin through the **Plugins** screen in WordPress admin.
-3. Go to **Settings → CloseHub → API**.
+3. Go to **Settings → CloseHub**.
 4. Copy the **Site URL** and **API Key** shown on that page.
 5. Paste both values into CloseHub under your project's WordPress connection settings.
 
@@ -85,11 +85,11 @@ On a WordPress Multisite network, the same endpoints listed above are shared by 
 
 = Where do I find my API key? =
 
-Go to **Settings → CloseHub → API** in your WordPress admin. The key is displayed there along with a copy button.
+Go to **Settings → CloseHub** in your WordPress admin. The key is displayed there along with a copy button.
 
 = Can I regenerate the API key? =
 
-Yes. Click **Regenerate Key** on the Settings → CloseHub → API tab. The old key stops working immediately — update CloseHub with the new key right away.
+Yes. Click **Regenerate Key** on the Settings → CloseHub page. The old key stops working immediately — update CloseHub with the new key right away.
 
 = How do I connect Claude Team when OAuth discovery is blocked? =
 

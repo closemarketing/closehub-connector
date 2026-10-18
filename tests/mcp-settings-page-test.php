@@ -65,6 +65,7 @@ closehub_test_assert( false !== strpos( $output, '/closehub/v1/elm-releases/{id}
 closehub_test_assert( false !== strpos( $output, 'https://example.test/wp-json/closehub/v1/' ), 'The CloseHub endpoint is missing.' );
 closehub_test_assert( false !== strpos( $output, CloseHub_Admin::get_mcp_server_query_url() ), 'The MCP server URL is missing.' );
 closehub_test_assert( false !== strpos( $output, 'davidperez' ), 'The acting user is missing.' );
+closehub_test_assert( false !== strpos( $output, 'data-closehub-copy="authorization"' ), 'The header name must be copyable on its own.' );
 closehub_test_assert( false !== strpos( $output, 'No sign-in' ), 'The Claude Team no-sign-in instruction is missing.' );
 closehub_test_assert( false !== strpos( $output, 'MCP Adapter is not available' ), 'The unavailable Adapter status is missing.' );
 closehub_test_assert( false !== strpos( $output, 'name="closehub_regenerate"' ), 'The regenerate action is missing.' );

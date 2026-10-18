@@ -260,8 +260,12 @@ class CloseHub_Admin {
 				<li><?php echo wp_kses( __( 'In Claude, add a custom connector and paste the <strong>MCP server URL</strong>.', 'closehub-connector' ), [ 'strong' => [] ] ); ?></li>
 				<li><?php echo wp_kses( __( 'Set Authentication to <strong>No sign-in</strong>.', 'closehub-connector' ), [ 'strong' => [] ] ); ?></li>
 				<li>
-					<?php esc_html_e( 'Add a request header with your API key:', 'closehub-connector' ); ?>
-					<?php $this->render_copy( 'Bearer ' . $api_key, 'authorization: Bearer ' . substr( $api_key, 0, 8 ) . '…' ); ?>
+					<?php esc_html_e( 'Add a request header and set its name to:', 'closehub-connector' ); ?>
+					<?php $this->render_copy( 'authorization' ); ?>
+				</li>
+				<li>
+					<?php esc_html_e( 'Set the header value to:', 'closehub-connector' ); ?>
+					<?php $this->render_copy( 'Bearer ' . $api_key, 'Bearer ' . substr( $api_key, 0, 8 ) . '…' ); ?>
 				</li>
 			</ol>
 

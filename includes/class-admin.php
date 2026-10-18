@@ -179,7 +179,7 @@ class CloseHub_Admin {
 		?>
 		<span class="closehub-copy">
 			<code><?php echo esc_html( '' !== $label ? $label : $value ); ?></code>
-			<button type="button" class="button button-small" data-closehub-copy="<?php echo esc_attr( $value ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+			<button type="button" class="button button-small" data-closehub-copy="<?php echo esc_attr( $value ); ?>" data-copied="<?php echo esc_attr__( 'Copied!', 'closehub-connector' ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
 		</span>
 		<?php
 	}
@@ -221,7 +221,7 @@ class CloseHub_Admin {
 					<td>
 						<input type="password" id="closehub-api-key" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text code" readonly />
 						<button type="button" class="button" data-closehub-reveal="closehub-api-key" data-show="<?php echo esc_attr__( 'Show', 'closehub-connector' ); ?>" data-hide="<?php echo esc_attr__( 'Hide', 'closehub-connector' ); ?>"><?php esc_html_e( 'Show', 'closehub-connector' ); ?></button>
-						<button type="button" class="button" data-closehub-copy="<?php echo esc_attr( $api_key ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
+						<button type="button" class="button" data-closehub-copy="<?php echo esc_attr( $api_key ); ?>" data-copied="<?php echo esc_attr__( 'Copied!', 'closehub-connector' ); ?>"><?php esc_html_e( 'Copy', 'closehub-connector' ); ?></button>
 						<p class="description"><?php esc_html_e( 'Used by CloseHub and by Claude Team. Keep it secret — anyone with it can manage this site.', 'closehub-connector' ); ?></p>
 					</td>
 				</tr>
@@ -357,6 +357,14 @@ class CloseHub_Admin {
 			var copy = event.target.closest( '[data-closehub-copy]' );
 			if ( copy ) {
 				navigator.clipboard.writeText( copy.getAttribute( 'data-closehub-copy' ) );
+				if ( ! copy.hasAttribute( 'data-label' ) ) {
+					copy.setAttribute( 'data-label', copy.textContent );
+				}
+				copy.textContent = copy.getAttribute( 'data-copied' );
+				clearTimeout( copy.closehubTimer );
+				copy.closehubTimer = setTimeout( function () {
+					copy.textContent = copy.getAttribute( 'data-label' );
+				}, 1500 );
 				return;
 			}
 			var reveal = event.target.closest( '[data-closehub-reveal]' );

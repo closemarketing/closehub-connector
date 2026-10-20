@@ -115,12 +115,21 @@ Those classes currently use Basic Auth (username + app password) + WooCommerce c
 
 ### Cache purge (`closehub/clear-cache`)
 
-`CloseHub_Site_Abilities::clear_cache()` dispatches to the first active entry of `cache_providers()`, a slug-keyed list (`label`, `is_active`, `purge`) passed through the `closehub_clear_cache_providers` filter. Only WP Rocket (`wp-rocket`, via `rocket_clean_domain()` / `rocket_clean_post()` / `rocket_clean_minify()`) ships today. To support another cache plugin, add one entry whose `purge( $scope, $post_ids, $minify )` returns `{ cleared, post_ids, failed_post_ids?, minify_cleared? }` — the ability's input/output contract must not change. Always use the cache plugin's public API, never delete cache files directly. It purges the current blog only, like every other site ability.
+`CloseHub_Site_Abilities::clear_cache()` dispatches to the first active entry of `cache_providers()`, a slug-keyed list (`label`, `is_active`, `purge`) passed through the `closehub_clear_cache_providers` filter. Two ship today, in this order: WP Rocket (`wp-rocket`, via `rocket_clean_domain()` / `rocket_clean_post()` / `rocket_clean_minify()`) and LiteSpeed Cache (`litespeed`, via the `litespeed_purge_all` / `litespeed_purge_post` actions). To support another cache plugin, add one entry whose `purge( $scope, $post_ids, $minify )` returns `{ cleared, post_ids, failed_post_ids?, minify_cleared? }` — the ability's input/output contract must not change. Always use the cache plugin's public API, never delete cache files directly. It purges the current blog only, like every other site ability.
 
 Multisite caveats (WP Rocket):
 - `rocket_clean_domain()` resolves the current blog's home URL and `rocket_clean_minify()` uses `get_current_blog_id()`, so both target the right site after `switch_to_blog()`.
 - `rocket_clean_domain()` runs only once per request (it bails once `rocket_after_clean_domain` has fired), and both it and `rocket_clean_post()` return void while `rocket_is_importing()` is true. `purge_wp_rocket()` checks those conditions up front and reports `cleared: false` instead of reading void as success. A future network-wide fan-out would need a separate request per blog, or a WP Rocket API that allows it, to purge more than the first site.
 - On a subdirectory network, the main site's cache folder (`cache/wp-rocket/<host>/`) contains the subsites' folders, and WP Rocket does not preserve them, so `scope=all` on the main site also purges every subsite. That's WP Rocket's behavior; we don't delete files ourselves to work around it.
+
+LiteSpeed caveats:
+- Purges are queued and sent to the web server as an `X-LiteSpeed-Purge` response header when the request ends, so `cleared: true` means "queued", not "confirmed". On a non-LiteSpeed server (or without QUIC.cloud) the header has no effect.
+- `litespeed_purge_post` silently ignores posts whose status is not `publish`/`trash`/`private`/`draft`; `purge_litespeed()` reports those in `failed_post_ids`.
+- There is no public action to clear only CSS/JS, so `minify_cleared` is `true` only with `scope=all` (`litespeed_purge_all` already includes CSS/JS).
+
+### SEO plugins
+
+SEO title/description/focus keyword are written for every active plugin among Rank Math (`rank_math_*`), Yoast (`_yoast_wpseo_*`) and SEOPress (`_seopress_titles_title`, `_seopress_titles_desc`, `_seopress_analysis_target_kw`), and read back with that same precedence (`CloseHub_REST_API::cms_metadata()`). `closehub/set-post-noindex` writes only the first active one; SEOPress stores `_seopress_robots_index = 'yes'` for noindex and deletes the meta to clear it.
 
 When changing a code path used by a registered MCP ability, update the ability schema and permission checks as needed so its behavior stays aligned with the REST endpoint.
 

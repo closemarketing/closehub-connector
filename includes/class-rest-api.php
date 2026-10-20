@@ -520,6 +520,10 @@ class CloseHub_REST_API {
 			$data['seo_title']         = get_post_meta( $post_id, '_yoast_wpseo_title', true ) ?: null;
 			$data['seo_description']   = get_post_meta( $post_id, '_yoast_wpseo_metadesc', true ) ?: null;
 			$data['seo_focus_keyword'] = get_post_meta( $post_id, '_yoast_wpseo_focuskw', true ) ?: null;
+		} elseif ( defined( 'SEOPRESS_VERSION' ) ) {
+			$data['seo_title']         = get_post_meta( $post_id, '_seopress_titles_title', true ) ?: null;
+			$data['seo_description']   = get_post_meta( $post_id, '_seopress_titles_desc', true ) ?: null;
+			$data['seo_focus_keyword'] = get_post_meta( $post_id, '_seopress_analysis_target_kw', true ) ?: null;
 		}
 
 		return $data;
@@ -674,6 +678,21 @@ class CloseHub_REST_API {
 				return $result;
 			}
 			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_focuskw', $seo_focus_keyword );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+		}
+
+		if ( defined( 'SEOPRESS_VERSION' ) ) {
+			$result = $this->update_post_meta( $post_id, '_seopress_titles_title', $seo_title );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, '_seopress_titles_desc', $seo_description );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			$result = $this->update_post_meta( $post_id, '_seopress_analysis_target_kw', $seo_focus_keyword );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 			}

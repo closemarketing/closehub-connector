@@ -42,6 +42,8 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/list-unused-plugins` (`activate_plugins`, read-only) — List installed plugins that are not currently active, as removal candidates. Takes no parameters.
 * `closehub/update-plugins-and-core` (`update_plugins` and `update_core`) — Update every plugin with an available update and WordPress core to the latest version, with a per-plugin success result. Takes no parameters.
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
+* `closehub/link-translations` (`edit_post` on both posts) — Link two existing posts as WPML translations without creating or editing content. `post_id` joins the translation group of `translation_of` (the original) in `language`. Rejects a language mismatch, different post types, a non-translatable post type, a `translation_of` that is itself a translation, and an existing translation in that language (`closehub_translation_conflict`) unless `force: true`, which detaches it into its own group. Purges the cache of every post in the affected groups unless `clear_cache: false`. Example: `{ "post_id": 5789, "translation_of": 4732, "language": "en" }`.
+* `closehub/unlink-translation` (`edit_post`) — Move a translation into a translation group of its own. The original post of a group cannot be unlinked while it has translations.
 * `closehub/clear-cache` (`rocket_purge_cache` or `manage_options`) — Purge the page cache of the active caching plugin (currently WP Rocket). `scope` is `all` (default, whole site) or `posts` (only the given `post_ids`; IDs that don't match a post are reported back in `invalid_post_ids`). Pass `minify: true` to also clear minified CSS/JS files. Returns `503` when no supported cache plugin is active. On multisite it purges only the site the MCP request is made against; on a subdirectory network, purging the main site with WP Rocket also clears the subsites' cached pages, since they live inside the main site's cache folder. Example: `{ "scope": "posts", "post_ids": [ 42, 57 ] }`.
 
 **What it replaces:**
@@ -117,6 +119,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= Unreleased =
+* Added the `closehub/link-translations` and `closehub/unlink-translation` MCP abilities to link existing posts as WPML translations. `list-posts` and `get-post` now return every translation (`language`, `post_id`, `translation_group`), `list-posts` honors `language` with WPML (including `all`), and `create-post` now rejects `post_id` instead of silently creating a duplicate.
 
 = 1.3.0 =
 * Simplified settings into a single page: the CloseHub API key now also authenticates MCP (Claude Team) as a Bearer token, acting as the user who last generated it. The separate `chm_` shared token and the API/MCP tabs were removed; Claude Team connectors using a `chm_` token must be updated to use the API key.

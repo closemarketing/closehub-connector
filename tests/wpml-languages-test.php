@@ -26,10 +26,12 @@ class Fake_SitePress {
 	public function set_active_languages( array $codes ): bool { $GLOBALS['active'] = $codes; return true; }
 	public function get_active_languages( bool $refresh = false ): array { return array_flip( $GLOBALS['active'] ); }
 	public function set_default_language( string $code ): void { $GLOBALS['default'] = $code; }
-	public function make_duplicate( int $id, string $lang ): int {
+	public function make_duplicate( int $id, string $lang ): int|WP_Error {
 		if ( ! $GLOBALS['native'] ) { return 0; }
+		if ( ! empty( $GLOBALS['native_error'] ) ) { return new WP_Error( 'wpml_boom', 'WPML exploded.' ); }
 		$new = $GLOBALS['next_id']++;
-		$GLOBALS['rows'][ $new ] = [ $GLOBALS['rows'][ $id ][0], $lang, $GLOBALS['rows'][ $id ][1] ];
+		$GLOBALS['rows'][ $new ] = [ $GLOBALS['rows'][ $id ][0], ! empty( $GLOBALS['native_wrong_language'] ) ? 'de' : $lang, $GLOBALS['rows'][ $id ][1] ];
+		$GLOBALS['status'][ $new ] = 'publish';
 		return $new;
 	}
 }
@@ -59,6 +61,7 @@ function apply_filters( string $hook, mixed $value, mixed ...$args ): mixed {
 		case 'wpml_default_language': return $GLOBALS['default'];
 		case 'wpml_element_type': return 'post_' . $value;
 		case 'wpml_is_translated_post_type': return true;
+		case 'wpml_object_id': return (int) $value + 100;
 		case 'wpml_element_language_details':
 			$row = $GLOBALS['rows'][ (int) $args[0]['element_id'] ] ?? null;
 			return $row ? (object) [ 'trid' => $row[0], 'language_code' => $row[1], 'source_language_code' => $row[2] ] : null;
@@ -79,8 +82,13 @@ function get_post_meta( int $id ): array { return [ 'k' => [ 'v' ], '_icl_lang_d
 function add_post_meta( int $id, string $k, mixed $v ): void { $GLOBALS['meta'][ $id ][ $k ] = $v; }
 function wp_slash( mixed $v ): mixed { return $v; }
 function maybe_unserialize( mixed $v ): mixed { return $v; }
-function wp_delete_post( int $id, bool $force ): void {}
-function get_post_status( int $id ): string { return 'draft'; }
+function wp_delete_post( int $id, bool $force ): void { $GLOBALS['deleted'][] = $id; }
+function get_post_status( int $id ): string { return $GLOBALS['status'][ $id ] ?? 'draft'; }
+function get_current_blog_id(): int { return 1; }
+function wp_update_post( array $args ): int { $GLOBALS['status'][ $args['ID'] ] = $args['post_status']; return $args['ID']; }
+function get_object_taxonomies( string $type ): array { return [ 'category' ]; }
+function wp_get_object_terms( int $id, string $tax, array $args ): array { return [ 4, 5 ]; }
+function wp_set_object_terms( int $id, array $terms, string $tax ): void { $GLOBALS['terms'][ $id ][ $tax ] = $terms; }
 
 require_once dirname( __DIR__ ) . '/includes/class-wpml.php';
 
@@ -114,6 +122,19 @@ check( 'closehub_invalid_language' === code( CloseHub_WPML::duplicate( 100, 'de'
 $dup = CloseHub_WPML::duplicate( 100, 'fr' );
 check( ! is_wp_error( $dup ) && 'fr' === $dup['language'] && 1 === $dup['translation_group'] && true === $dup['linked'], 'Native duplicate must be linked in the target language.' );
 
+check( 'draft' === ( $GLOBALS['status'][ $dup['post_id'] ] ?? '' ), 'A native duplicate of a published post must be forced back to draft.' );
+
+// WPML errors from the native duplication are returned, not cast to post ID 1
+$GLOBALS['native_error'] = true;
+check( 'wpml_boom' === code( CloseHub_WPML::duplicate( 200, 'fr' ) ), 'A WP_Error from make_duplicate must be propagated.' );
+$GLOBALS['native_error'] = false;
+
+// A copy that fails verification is removed, not left behind
+$GLOBALS['native_wrong_language'] = true;
+$GLOBALS['deleted']               = [];
+check( 'closehub_duplicate_failed' === code( CloseHub_WPML::duplicate( 200, 'fr' ) ) && 1 === count( $GLOBALS['deleted'] ), 'A failed duplicate must be deleted.' );
+$GLOBALS['native_wrong_language'] = false;
+
 // duplicate (unlinked copy, own group, WPML duplicate flag not copied)
 $copy = CloseHub_WPML::duplicate( 200, 'en', false );
 check( ! is_wp_error( $copy ) && 'en' === $copy['language'] && 2 !== $copy['translation_group'] && false === $copy['linked'], 'link=false must create an independent copy in its own group.' );
@@ -123,6 +144,7 @@ check( isset( $GLOBALS['meta'][ $copy['post_id'] ]['k'] ) && ! isset( $GLOBALS['
 $GLOBALS['native'] = false;
 $fallback = CloseHub_WPML::duplicate( 200, 'fr' );
 check( ! is_wp_error( $fallback ) && 2 === $fallback['translation_group'] && 'fr' === $fallback['language'], 'Fallback copy must be linked to the original.' );
+check( [ 104, 105 ] === ( $GLOBALS['terms'][ $fallback['post_id'] ]['category'] ?? [] ), 'Fallback copy must carry the (translated) taxonomy terms.' );
 
 // WPML inactive
 unset( $GLOBALS['sitepress'] );

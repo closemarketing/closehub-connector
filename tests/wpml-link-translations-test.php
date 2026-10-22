@@ -42,6 +42,7 @@ class Fake_WPDB {
 }
 $wpdb = new Fake_WPDB();
 
+function get_current_blog_id(): int { return 1; }
 function post_type_of( int $id ): string { return $GLOBALS['types'][ $id ] ?? 'post'; }
 function has_filter( string $hook ): bool { return in_array( $hook, [ 'wpml_active_languages', 'wpml_element_language_details', 'wpml_is_translated_post_type' ], true ); }
 function apply_filters( string $hook, mixed $value, mixed ...$args ): mixed {
@@ -58,7 +59,7 @@ function apply_filters( string $hook, mixed $value, mixed ...$args ): mixed {
 function do_action( string $hook, mixed ...$args ): void {
 	$GLOBALS['actions'][] = $args[0];
 	if ( 'wpml_set_element_language_details' === $hook ) {
-		$GLOBALS['rows'][ $args[0]['element_id'] ] = [ $args[0]['trid'], $args[0]['language_code'], $args[0]['source_language_code'] ];
+		$GLOBALS['rows'][ $args[0]['element_id'] ] = [ $args[0]['trid'] ?: ( max( array_column( $GLOBALS['rows'], 0 ) ) + 1 ), $args[0]['language_code'], $args[0]['source_language_code'] ];
 	}
 }
 function get_post( int $id ): ?WP_Post { return $id > 0 && ( isset( $GLOBALS['rows'][ $id ] ) || isset( $GLOBALS['types'][ $id ] ) ) ? new WP_Post( $id, post_type_of( $id ) ) : null; }
@@ -86,6 +87,11 @@ check( 'closehub_invalid_translation_link' === code( CloseHub_WPML::link( 4732, 
 check( 'closehub_translation_has_dependents' === code( CloseHub_WPML::link( 8000, 9000, 'es' ) ), 'Moving a source that has translations needs force.' );
 check( 'closehub_post_not_found' === code( CloseHub_WPML::link( 123456, 4732, 'en' ) ), 'Missing post must be reported.' );
 check( $before === $GLOBALS['rows'], 'Rejected links must not change WPML data.' );
+
+// A forced link names every other post it would change, so permissions can be checked on them.
+check( [ 6000 ] === CloseHub_WPML::forced_link_collateral( 5789, 4732, 'en' ), 'Forced link must name the translation it detaches.' );
+check( [ 8001 ] === CloseHub_WPML::forced_link_collateral( 8000, 9000, 'es' ), 'Forced link must name the translations that depend on the moved post.' );
+check( [] === CloseHub_WPML::forced_link_collateral( 123456, 4732, 'en' ), 'Unknown posts have no collateral.' );
 
 // Real case: 5789 (en, own trid) becomes the en translation of 4732, replacing 6000 with force.
 $result = CloseHub_WPML::link( 5789, 4732, 'en', true );

@@ -17,6 +17,11 @@ function get_sites( array $args ): array { return [ (object) [ 'blog_id' => 1 ],
 function switch_to_blog( int $blog_id ): void { $GLOBALS['closehub_test_blog_id'] = $blog_id; }
 function restore_current_blog(): void { $GLOBALS['closehub_test_blog_id'] = 1; }
 function get_site_url(): string { return 'https://site-' . $GLOBALS['closehub_test_blog_id'] . '.test'; }
+$GLOBALS['closehub_test_super'] = true;
+$GLOBALS['closehub_test_member_of'] = [ 1 => true ];
+function is_super_admin(): bool { return $GLOBALS['closehub_test_super']; }
+function get_current_user_id(): int { return 7; }
+function get_blogs_of_user( int $user_id ): array { return $GLOBALS['closehub_test_member_of']; }
 function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
 function absint( mixed $value ): int { return abs( (int) $value ); }
 
@@ -69,11 +74,40 @@ $ran = [];
 CloseHub_Network::execute( 'closehub/update-plugins-and-core', $callback, $allow )( [] );
 closehub_test_assert( [ 1 ] === $ran, 'A server-wide ability must run once.' );
 
+// ── A translation link never fans out: translation_of needs exactly one site ──
+$ran    = [];
+$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5 ] );
+closehub_test_assert( is_wp_error( $linked ) && 'closehub_site_id_required' === $linked->get_error_code() && [] === $ran, 'translation_of without site_ids must be rejected before running.' );
+$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5, 'site_ids' => [ 2, 3 ] ] );
+closehub_test_assert( is_wp_error( $linked ) && [] === $ran, 'translation_of with several sites must be rejected.' );
+$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5, 'site_ids' => [ 2 ] ] );
+closehub_test_assert( [ 2 ] === $ran && ! is_wp_error( $linked ), 'translation_of with one site must run on it.' );
+$ran = [];
+CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'title' => 'x' ] );
+closehub_test_assert( [ 1, 2, 3 ] === $ran, 'create-post without translation_of must still fan out.' );
+
+// ── A user who is not a super admin only reaches the sites they belong to ──
+$GLOBALS['closehub_test_super']     = false;
+$GLOBALS['closehub_test_member_of'] = [ 2 => true ];
+$ran    = [];
+$result = CloseHub_Network::execute( 'closehub/list-posts', $callback, $allow )( [] );
+closehub_test_assert( [ 2 ] === $ran && 1 === count( $result['sites'] ), 'Fan-out must only cover the sites the user belongs to.' );
+$hidden = CloseHub_Network::execute( 'closehub/list-posts', $callback, $allow )( [ 'site_ids' => [ 3 ] ] );
+closehub_test_assert( is_wp_error( $hidden ) && 'closehub_site_not_found' === $hidden->get_error_code(), 'A hidden site must not be addressable.' );
+$hidden = CloseHub_Network::execute( 'closehub/trash-post', $callback, $allow )( [ 'site_id' => 3 ] );
+closehub_test_assert( is_wp_error( $hidden ) && 'closehub_site_not_found' === $hidden->get_error_code(), 'A hidden site must not be targetable.' );
+$GLOBALS['closehub_test_super'] = true;
+
+// ── site_id is declared required for targeted abilities only ──
+closehub_test_assert( [ 'post_id', 'site_id' ] === CloseHub_Network::required( 'closehub/trash-post', [ 'post_id' ] ), 'Targeted schema must require site_id.' );
+closehub_test_assert( [ 'title' ] === CloseHub_Network::required( 'closehub/create-post', [ 'title' ] ) && [] === CloseHub_Network::required( 'closehub/update-plugins-and-core', [] ), 'Fan-out and server-wide schemas must not require site_id.' );
+
 // ── Single site: input and output are untouched ──
 $GLOBALS['closehub_test_multisite'] = false;
 $ran    = [];
 $result = CloseHub_Network::execute( 'closehub/trash-post', $callback, $allow )( [ 'post_id' => 5 ] );
 closehub_test_assert( [ 1 ] === $ran && 'post-url' === $result['url'] && ! isset( $result['sites'] ) && ! isset( $result['site_id'] ), 'Single-site output must be unchanged.' );
+closehub_test_assert( [ 'post_id' ] === CloseHub_Network::required( 'closehub/trash-post', [ 'post_id' ] ), 'Single-site schema must not require site_id.' );
 closehub_test_assert( [ 'post_id' => [] ] === CloseHub_Network::input_properties( 'closehub/trash-post', [ 'post_id' => [] ] ), 'Single-site schema must not gain site_id.' );
 
 echo "MCP network ability checks passed.\n";

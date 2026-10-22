@@ -86,7 +86,7 @@ class CloseHub_Content_Abilities {
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false, string $category = 'closehub-content' ): void {
 		wp_register_ability( $id, [
 			'label' => $label, 'description' => CloseHub_Network::description( $id, $description ), 'category' => $category,
-			'input_schema' => [ 'type' => 'object', 'properties' => CloseHub_Network::input_properties( $id, $properties ), 'required' => $required ],
+			'input_schema' => [ 'type' => 'object', 'properties' => CloseHub_Network::input_properties( $id, $properties ), 'required' => CloseHub_Network::required( $id, $required ) ],
 			'execute_callback' => CloseHub_Network::execute( $id, $execute, $permission ), 'permission_callback' => CloseHub_Network::permission( $id, $permission ),
 			'meta' => [ 'show_in_rest' => true, 'mcp' => [ 'public' => true ], 'annotations' => [ 'readonly' => $readonly, 'destructive' => $destructive, 'idempotent' => $idempotent ] ],
 		] );
@@ -104,7 +104,22 @@ class CloseHub_Content_Abilities {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		return current_user_can( 'edit_post', $post_id ) && ( 'publish' !== ( $input['status'] ?? '' ) || self::type_cap( get_post_type( $post_id ) ?: 'post', 'publish_posts' ) );
 	}
-	public static function can_link_translations( $input ): bool { return current_user_can( 'edit_post', absint( $input['post_id'] ?? 0 ) ) && current_user_can( 'edit_post', absint( $input['translation_of'] ?? 0 ) ); }
+	public static function can_link_translations( $input ): bool {
+		$post_id        = absint( $input['post_id'] ?? 0 );
+		$translation_of = absint( $input['translation_of'] ?? 0 );
+		if ( ! current_user_can( 'edit_post', $post_id ) || ! current_user_can( 'edit_post', $translation_of ) ) {
+			return false;
+		}
+		// force=true detaches or moves other posts: the caller must be allowed to edit each of them too.
+		if ( ! empty( $input['force'] ) ) {
+			foreach ( CloseHub_WPML::forced_link_collateral( $post_id, $translation_of, sanitize_key( $input['language'] ?? '' ) ) as $other_id ) {
+				if ( ! current_user_can( 'edit_post', $other_id ) ) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
 	public static function can_delete_post( $input ): bool { return current_user_can( 'delete_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_manage_woocommerce(): bool { return current_user_can( 'manage_woocommerce' ); }
 	public static function can_upload_media(): bool { return current_user_can( 'upload_files' ); }

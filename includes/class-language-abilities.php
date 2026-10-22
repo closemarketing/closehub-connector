@@ -51,7 +51,7 @@ class CloseHub_Language_Abilities {
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
 		wp_register_ability( $id, [
 			'label' => $label, 'description' => CloseHub_Network::description( $id, $description ), 'category' => 'closehub-site',
-			'input_schema' => [ 'type' => 'object', 'properties' => CloseHub_Network::input_properties( $id, $properties ), 'required' => $required ],
+			'input_schema' => [ 'type' => 'object', 'properties' => CloseHub_Network::input_properties( $id, $properties ), 'required' => CloseHub_Network::required( $id, $required ) ],
 			'execute_callback' => CloseHub_Network::execute( $id, $execute, $permission ), 'permission_callback' => CloseHub_Network::permission( $id, $permission ),
 			'meta' => [ 'show_in_rest' => true, 'mcp' => [ 'public' => true ], 'annotations' => [ 'readonly' => $readonly, 'destructive' => $destructive, 'idempotent' => $idempotent ] ],
 		] );

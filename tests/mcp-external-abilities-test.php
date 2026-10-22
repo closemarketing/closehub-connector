@@ -18,6 +18,11 @@ function get_sites( array $args ): array { return [ (object) [ 'blog_id' => 1 ],
 function switch_to_blog( int $blog_id ): void { $GLOBALS['closehub_test_blog_id'] = $blog_id; }
 function restore_current_blog(): void { $GLOBALS['closehub_test_blog_id'] = 1; }
 function get_site_url(): string { return 'https://site-' . $GLOBALS['closehub_test_blog_id'] . '.test'; }
+$GLOBALS['closehub_test_super'] = true;
+$GLOBALS['closehub_test_member_of'] = [ 1 => true ];
+function is_super_admin(): bool { return $GLOBALS['closehub_test_super']; }
+function get_current_user_id(): int { return 7; }
+function get_blogs_of_user( int $user_id ): array { return $GLOBALS['closehub_test_member_of']; }
 function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
 function absint( mixed $value ): int { return abs( (int) $value ); }
 function apply_filters( string $hook, mixed $value, mixed ...$args ): mixed { return 'closehub_network_wrap_ability' === $hook ? $GLOBALS['closehub_test_wrap'] : $value; }
@@ -42,6 +47,7 @@ $args = [
 // ── Third-party ability gains a required site_id, keeps additionalProperties:false valid, and is tagged as wrapped ──
 $wrapped = CloseHub_Network::wrap_external_ability( $args, 'rank-math/get-redirections' );
 closehub_test_assert( isset( $wrapped['input_schema']['properties']['site_id'], $wrapped['input_schema']['properties']['status'] ), 'site_id must be added next to existing input properties.' );
+closehub_test_assert( in_array( 'site_id', $wrapped['input_schema']['required'], true ), 'site_id must be required in the declared schema.' );
 closehub_test_assert( isset( $wrapped['output_schema']['properties']['site_id'], $wrapped['output_schema']['properties']['total'] ), 'Output schema must allow site_id/site_url.' );
 closehub_test_assert( str_contains( $wrapped['description'], 'site_id is required' ) && true === $wrapped['meta']['closehub_network'] && true === $wrapped['meta']['mcp']['public'], 'Description and meta must be updated without losing existing meta.' );
 closehub_test_assert( $wrapped === CloseHub_Network::wrap_external_ability( $wrapped, 'rank-math/get-redirections' ), 'Wrapping twice must be a no-op.' );

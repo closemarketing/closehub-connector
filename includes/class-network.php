@@ -112,6 +112,7 @@ class CloseHub_Network {
 
 		$args['input_schema']               = [ 'type' => 'object' ] + $input_schema;
 		$args['input_schema']['properties'] = self::input_properties( $ability_id, (array) ( $input_schema['properties'] ?? [] ) );
+		$args['input_schema']['required']   = self::required( $ability_id, (array) ( $input_schema['required'] ?? [] ) );
 		if ( ! empty( $args['output_schema'] ) ) {
 			$args['output_schema'] = self::output_schema_with_site( $args['output_schema'] );
 		}
@@ -206,6 +207,14 @@ class CloseHub_Network {
 		return $properties;
 	}
 
+	/** Mark `site_id` as required in the schema of a targeted ability on multisite, matching what execute() enforces. */
+	public static function required( string $ability_id, array $required ): array {
+		if ( is_multisite() && self::TARGETED === self::scope( $ability_id ) ) {
+			$required[] = 'site_id';
+		}
+		return array_values( array_unique( $required ) );
+	}
+
 	public static function description( string $ability_id, string $description ): string {
 		if ( ! is_multisite() ) {
 			return $description;
@@ -289,7 +298,7 @@ class CloseHub_Network {
 
 	/** @return int[]|WP_Error */
 	private static function resolve_site_ids( array $input, string $scope ): array|WP_Error {
-		$available = array_map( static fn( $site ) => (int) $site->blog_id, get_sites( [ 'number' => 0, 'deleted' => 0, 'spam' => 0, 'archived' => 0 ] ) );
+		$available = array_map( static fn( $site ) => (int) $site->blog_id, self::visible_sites() );
 
 		if ( self::TARGETED === $scope ) {
 			$site_id = absint( $input['site_id'] ?? 0 );
@@ -302,13 +311,21 @@ class CloseHub_Network {
 			return [ $site_id ];
 		}
 
+		// A translation link points at a post ID, which means a different post on every site: never fan it out.
+		$one_site = ! empty( $input['translation_of'] );
 		if ( ! isset( $input['site_ids'] ) || [] === $input['site_ids'] ) {
+			if ( $one_site ) {
+				return new WP_Error( 'closehub_site_id_required', 'translation_of refers to a post of a single site: pass exactly one id in site_ids on a multisite network.', [ 'status' => 400 ] );
+			}
 			return $available;
 		}
 		$requested = array_values( array_unique( array_filter( array_map( 'absint', (array) $input['site_ids'] ) ) ) );
 		$unknown   = array_diff( $requested, $available );
 		if ( $unknown || ! $requested ) {
 			return new WP_Error( 'closehub_site_not_found', sprintf( 'Unknown site IDs: %s.', implode( ', ', $unknown ?: [ 0 ] ) ), [ 'status' => 404 ] );
+		}
+		if ( $one_site && 1 !== count( $requested ) ) {
+			return new WP_Error( 'closehub_site_id_required', 'translation_of refers to a post of a single site: pass exactly one id in site_ids on a multisite network.', [ 'status' => 400 ] );
 		}
 		return $requested;
 	}

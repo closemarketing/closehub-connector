@@ -27,6 +27,7 @@ composer.json                   Dev stubs only (wordpress, woocommerce, gravity-
 phpstan.neon                    PHPStan config (level 5)
 .distignore                     Files excluded from the .zip release build
 includes/
+    class-network.php           Multisite scope layer for MCP abilities (fanout / targeted / once) and the closehub/list-sites ability
     class-api-key.php           Generate, store, verify, and regenerate the API key; also authenticates it as an MCP Bearer token
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/
     class-admin.php             Settings → CloseHub admin page
@@ -61,6 +62,16 @@ Each public callback's business logic lives in a private `*_data()` method (e.g.
 - On a network (`is_multisite() === true`): calls `run_across_network( $data_builder, $network_key )`, which loops over `get_sites()`, does `switch_to_blog()` / `restore_current_blog()` around each call, and returns `{ "sites": [ { "site_id", "url", ...data or "error" }, ... ] }`. `$network_key` is only needed when `$data_builder()` returns a plain list rather than an associative array (e.g. `list_forms_data()` nests its result under `"forms"` per site instead of merging numeric keys into the entry).
 
 This means `POST /posts` creates the post on every site of the network, `GET /woocommerce/orders` returns per-site order stats, etc. — the client always talks to the same URL and key; only the shape of a successful response differs (single object vs. `{ sites: [...] }`).
+
+### Multisite behavior for MCP abilities
+
+Abilities are wrapped at registration by `CloseHub_Network::execute()` / `permission()` (see each class's `ability()` helper). `CloseHub_Network::SCOPES` maps every ability id to a scope; unlisted abilities default to `targeted`. When adding an ability, add it to that map.
+
+- `fanout`: runs on every site (or `site_ids`), returns `{ "sites": [ { "site_id", "site_url", ...data | "error" } ] }`.
+- `targeted`: requires `site_id` on multisite; returns the data with `site_id`/`site_url` merged in, or the `WP_Error`. Use for anything keyed by a post ID, file, or per-site setting.
+- `once`: server-wide (plugin install/updates); runs once on the current site.
+
+Ability callbacks stay single-site (`switch_to_blog()` is done by the wrapper); never fan out inside a callback. Capabilities are checked per site after switching. On a single site the wrapper is a pass-through.
 
 ## Key classes
 

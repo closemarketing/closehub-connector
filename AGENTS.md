@@ -27,6 +27,7 @@ composer.json                   Dev stubs only (wordpress, woocommerce, gravity-
 phpstan.neon                    PHPStan config (level 5)
 .distignore                     Files excluded from the .zip release build
 includes/
+    class-language-abilities.php MCP abilities for WPML languages (list/add/set default) and duplicate-post; link/unlink live in class-content-abilities.php, the WPML calls in class-wpml.php
     class-network.php           Multisite scope layer for MCP abilities (fanout / targeted / once) and the closehub/list-sites ability
     class-api-key.php           Generate, store, verify, and regenerate the API key; also authenticates it as an MCP Bearer token
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/

@@ -44,6 +44,11 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
 * `closehub/link-translations` (`edit_post` on both posts) — Link two existing posts as WPML translations without creating or editing content. `post_id` joins the translation group of `translation_of` (the original) in `language`. Rejects a language mismatch, different post types, a non-translatable post type, a `translation_of` that is itself a translation, and an existing translation in that language (`closehub_translation_conflict`) unless `force: true`, which detaches it into its own group. Purges the cache of every post in the affected groups unless `clear_cache: false`. Example: `{ "post_id": 5789, "translation_of": 4732, "language": "en" }`.
 * `closehub/unlink-translation` (`edit_post`) — Move a translation into a translation group of its own. The original post of a group cannot be unlinked while it has translations.
+* `closehub/list-languages` (`edit_posts`) — List the active WPML languages and the default one; `include_available: true` also lists supported languages that can still be added.
+* `closehub/add-language` (`manage_options`) — Activate a WPML-supported language by code, e.g. `{ "language": "fr" }`. Existing content is not changed.
+* `closehub/set-default-language` (`manage_options`) — Make an active language the site default.
+* `closehub/duplicate-post` (`edit_post` + create capability) — Copy an original post into one or more other languages as drafts, using WPML's own duplication. Each copy is linked to the original by default; `link: false` creates independent, unlinked copies. Example: `{ "post_id": 42, "languages": [ "en", "fr" ] }`.
+* `closehub/create-post` with `language` creates new content in that language; add `translation_of` to link it as a translation of an existing post, or leave it out to keep it unlinked.
 * `closehub/clear-cache` (`rocket_purge_cache` or `manage_options`) — Purge the page cache of the active caching plugin (currently WP Rocket). `scope` is `all` (default, whole site) or `posts` (only the given `post_ids`; IDs that don't match a post are reported back in `invalid_post_ids`). Pass `minify: true` to also clear minified CSS/JS files. Returns `503` when no supported cache plugin is active. On multisite pass `site_id` to choose the site to purge; on a subdirectory network, purging the main site with WP Rocket also clears the subsites' cached pages, since they live inside the main site's cache folder. Example: `{ "scope": "posts", "post_ids": [ 42, 57 ] }`.
 
 **What it replaces:**
@@ -124,6 +129,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 = Unreleased =
 * Added multisite support to MCP abilities: fan-out across the network or a single site via `site_id` / `site_ids`, per-site permission checks, and a new `closehub/list-sites` ability.
+* Added WPML language management abilities: `list-languages`, `add-language`, `set-default-language` and `duplicate-post` (linked or unlinked copies).
 * Fixed `closehub/update-post` applying the same post ID on every site of a network.
 * Added the `closehub/link-translations` and `closehub/unlink-translation` MCP abilities to link existing posts as WPML translations. `list-posts` and `get-post` now return every translation (`language`, `post_id`, `translation_group`), `list-posts` honors `language` with WPML (including `all`), and `create-post` now rejects `post_id` instead of silently creating a duplicate.
 

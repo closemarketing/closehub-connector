@@ -51,6 +51,7 @@ function closehub_init(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-network.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-site-abilities.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-language-abilities.php';
 
 	( new CloseHub_REST_API() )->register();
 	( new CloseHub_Admin() )->register();
@@ -62,5 +63,6 @@ function closehub_init(): void {
 
 	CloseHub_Content_Abilities::register();
 	CloseHub_Site_Abilities::register();
+	CloseHub_Language_Abilities::register();
 	CloseHub_Network::register();
 }

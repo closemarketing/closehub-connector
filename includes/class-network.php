@@ -27,6 +27,10 @@ class CloseHub_Network {
 
 	private const SCOPES = [
 		'closehub/list-posts'              => self::FANOUT,
+		'closehub/list-languages'          => self::FANOUT,
+		'closehub/add-language'            => self::TARGETED,
+		'closehub/set-default-language'    => self::TARGETED,
+		'closehub/duplicate-post'          => self::TARGETED,
 		'closehub/create-post'             => self::FANOUT,
 		'closehub/get-order-summary'       => self::FANOUT,
 		'closehub/flush-permalinks'        => self::FANOUT,

@@ -50,7 +50,7 @@ class CloseHub_Content_Abilities {
 			'status' => [ 'type' => 'string' ], 'search' => [ 'type' => 'string' ], 'language' => [ 'type' => 'string' ], 'page' => [ 'type' => 'integer', 'default' => 1 ], 'per_page' => [ 'type' => 'integer', 'default' => 20 ], 'post_type' => [ 'type' => 'string', 'default' => 'post' ],
 		] );
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
-		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
+		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post. With WPML, pass language to create it in that language; add translation_of (the original post ID) to also link it as a translation of that post, or omit it to keep it unlinked. To copy an existing post into another language use duplicate-post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
 		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
 		self::ability( 'closehub/upload-media', 'Upload image', 'Upload one image to the Media Library. Use its returned URL as featured_image_url when creating or updating content.', [ self::class, 'upload_media' ], [ self::class, 'can_upload_media' ], false, false, [
 			'filename'    => [ 'type' => 'string' ],
@@ -186,7 +186,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	/** Linking changes hreflang and language switchers on every post of both groups, so purge them (opt out with clear_cache=false). */
-	private static function finish_translation_change( array $result, array $input ): array {
+	public static function finish_translation_change( array $result, array $input ): array {
 		$ids = $result['affected_post_ids'];
 		unset( $result['affected_post_ids'] );
 		if ( ( $input['clear_cache'] ?? true ) && ( $result['changed'] ?? true ) ) {

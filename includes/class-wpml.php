@@ -286,4 +286,195 @@ class CloseHub_WPML {
 		self::refresh( $affected );
 		return self::result( $post_id, $old_trid, $affected );
 	}
+
+	// ── Language management ────────────────────────────────────────────────────
+
+	/** The global SitePress instance, or a WP_Error when WPML is not active. */
+	/** @return object|WP_Error */
+	private static function sitepress(): mixed {
+		global $sitepress;
+		if ( ! is_object( $sitepress ) || ! has_filter( 'wpml_active_languages' ) ) {
+			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to manage languages.', [ 'status' => 400 ] );
+		}
+		return $sitepress;
+	}
+
+	public static function default_language(): string {
+		return (string) apply_filters( 'wpml_default_language', null );
+	}
+
+	/**
+	 * Active languages (code, name, native name, default flag) and, with
+	 * $include_available, the WPML-supported languages not yet activated.
+	 */
+	public static function languages( bool $include_available = false ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$default = self::default_language();
+		$active  = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		$out     = [];
+		foreach ( $active as $code => $language ) {
+			$out[] = [
+				'code'        => (string) $code,
+				'name'        => (string) ( $language['translated_name'] ?? $language['native_name'] ?? $code ),
+				'native_name' => (string) ( $language['native_name'] ?? $code ),
+				'locale'      => (string) ( $language['default_locale'] ?? '' ),
+				'default'     => (string) $code === $default,
+			];
+		}
+		$result = [ 'default_language' => $default, 'languages' => $out ];
+
+		if ( $include_available ) {
+			$available = [];
+			foreach ( self::supported_languages( $sitepress ) as $code => $language ) {
+				if ( ! isset( $active[ $code ] ) ) {
+					$available[] = [ 'code' => (string) $code, 'name' => (string) ( $language['english_name'] ?? $code ), 'native_name' => (string) ( $language['native_name'] ?? $code ), 'locale' => (string) ( $language['default_locale'] ?? '' ) ];
+				}
+			}
+			$result['available_languages'] = $available;
+		}
+		return $result;
+	}
+
+	/** @return array<string, array<string, mixed>> Every language WPML supports, keyed by code. */
+	private static function supported_languages( object $sitepress ): array {
+		return method_exists( $sitepress, 'get_languages' ) ? (array) $sitepress->get_languages( false, false, true ) : [];
+	}
+
+	/** Activate a WPML-supported language. Existing content is not touched. */
+	public static function add_language( string $code ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$code      = sanitize_key( $code );
+		$supported = self::supported_languages( $sitepress );
+		if ( '' === $code || ! isset( $supported[ $code ] ) ) {
+			return new WP_Error( 'closehub_invalid_language', 'The language code is not supported by WPML. Use list-languages with include_available to see the valid codes.', [ 'status' => 400 ] );
+		}
+		$active = array_keys( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ) );
+		if ( in_array( $code, $active, true ) ) {
+			return [ 'language' => $code, 'added' => false ] + (array) self::languages();
+		}
+		if ( ! method_exists( $sitepress, 'set_active_languages' ) || ! $sitepress->set_active_languages( array_merge( $active, [ $code ] ) ) ) {
+			return new WP_Error( 'closehub_language_add_failed', 'WPML could not activate the language.', [ 'status' => 500 ] );
+		}
+		if ( method_exists( $sitepress, 'get_active_languages' ) ) {
+			$sitepress->get_active_languages( true ); // Refresh WPML's cached language list.
+		}
+		return [ 'language' => $code, 'added' => true ] + (array) self::languages();
+	}
+
+	/** Make an already active language the site's default language. */
+	public static function set_default_language( string $code ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$code   = sanitize_key( $code );
+		$active = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		if ( '' === $code || ! isset( $active[ $code ] ) ) {
+			return new WP_Error( 'closehub_invalid_language', 'The language must be an active WPML language. Add it first with add-language.', [ 'status' => 400 ] );
+		}
+		$previous = self::default_language();
+		if ( $previous === $code ) {
+			return [ 'language' => $code, 'previous_default' => $previous, 'changed' => false ];
+		}
+		if ( ! method_exists( $sitepress, 'set_default_language' ) ) {
+			return new WP_Error( 'closehub_language_default_failed', 'This WPML version cannot change the default language.', [ 'status' => 500 ] );
+		}
+		$sitepress->set_default_language( $code );
+		if ( self::default_language() !== $code ) {
+			return new WP_Error( 'closehub_language_default_failed', 'WPML did not change the default language.', [ 'status' => 500 ] );
+		}
+		return [ 'language' => $code, 'previous_default' => $previous, 'changed' => true ];
+	}
+
+	/**
+	 * Copy an existing post into another language as a new draft linked to it
+	 * as a translation. Uses WPML's own duplication (which keeps the copy
+	 * flagged as a duplicate and copies terms/meta) and falls back to a plain
+	 * copy of the post and its meta when that API is unavailable. With
+	 * $link = false the copy is created in the target language but kept in a
+	 * translation group of its own (no link to the original).
+	 */
+	public static function duplicate( int $post_id, string $language, bool $link = true ): array|WP_Error {
+		$valid = self::validate( $language, $post_id );
+		if ( is_wp_error( $valid ) ) {
+			return $valid;
+		}
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+		if ( ! self::is_translatable( $post ) ) {
+			return new WP_Error( 'closehub_post_type_not_translatable', sprintf( 'The "%s" post type is not translatable in WPML.', $post->post_type ), [ 'status' => 400 ] );
+		}
+		$details = self::raw_details( $post );
+		if ( ! $details || empty( $details->trid ) ) {
+			return new WP_Error( 'closehub_invalid_translation_source', 'The post has no WPML language details.', [ 'status' => 400 ] );
+		}
+		if ( ! empty( $details->source_language_code ) ) {
+			return new WP_Error( 'closehub_translation_source_not_original', 'The post is itself a translation; duplicate the original post instead.', [ 'status' => 400 ] );
+		}
+		if ( $details->language_code === $valid ) {
+			return new WP_Error( 'closehub_invalid_language', 'The target language must differ from the post\'s language.', [ 'status' => 400 ] );
+		}
+		$trid = (int) $details->trid;
+		foreach ( self::members( $trid, self::element_type( $post ) ) as $member ) {
+			if ( $member['language'] === $valid ) {
+				return new WP_Error( 'closehub_translation_conflict', sprintf( 'Post %d is already the "%s" translation of this post.', $member['post_id'], $valid ), [ 'status' => 409, 'conflicting_post_id' => $member['post_id'] ] );
+			}
+		}
+
+		global $sitepress;
+		$new_id = 0;
+		if ( $link && is_object( $sitepress ) && method_exists( $sitepress, 'make_duplicate' ) ) {
+			$new_id = (int) $sitepress->make_duplicate( $post_id, $valid );
+		}
+		if ( ! $new_id ) {
+			$new_id = self::copy_post( $post, $valid, $link );
+			if ( is_wp_error( $new_id ) ) {
+				return $new_id;
+			}
+		}
+		self::refresh( [ $post_id, $new_id ] );
+
+		$result = self::result( $new_id, null, array_merge( [ $post_id, $new_id ], array_column( self::members( $trid, self::element_type( $post ) ), 'post_id' ) ) );
+		if ( $result['language'] !== $valid || $link !== ( (int) ( $result['translation_group'] ?? 0 ) === $trid ) ) {
+			return new WP_Error( 'closehub_duplicate_failed', 'WPML did not apply the duplicate in the requested language and link state.', [ 'status' => 500 ] );
+		}
+		return $result + [ 'duplicated_from' => $post_id, 'linked' => $link ];
+	}
+
+	/** Fallback copy: a draft with the same content and (non-WPML) meta, then linked as a translation. */
+	private static function copy_post( WP_Post $post, string $language, bool $link ): int|WP_Error {
+		$new_id = wp_insert_post( [
+			'post_title'   => $post->post_title,
+			'post_content' => $post->post_content,
+			'post_excerpt' => $post->post_excerpt,
+			'post_type'    => $post->post_type,
+			'post_status'  => 'draft',
+			'post_author'  => $post->post_author,
+		], true );
+		if ( is_wp_error( $new_id ) ) {
+			return $new_id;
+		}
+		foreach ( (array) get_post_meta( $post->ID ) as $key => $values ) {
+			if ( str_starts_with( (string) $key, '_icl_' ) || in_array( $key, [ '_edit_lock', '_edit_last', '_wp_old_slug' ], true ) ) {
+				continue;
+			}
+			foreach ( (array) $values as $value ) {
+				add_post_meta( $new_id, (string) $key, wp_slash( maybe_unserialize( $value ) ) );
+			}
+		}
+		$assigned = self::assign( $new_id, $language, $link ? $post->ID : 0 );
+		if ( is_wp_error( $assigned ) ) {
+			wp_delete_post( $new_id, true );
+			return $assigned;
+		}
+		return $new_id;
+	}
 }

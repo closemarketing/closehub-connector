@@ -15,9 +15,11 @@ function wp_register_ability(): void {}
 require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 require_once dirname( __DIR__ ) . '/includes/class-site-abilities.php';
+require_once dirname( __DIR__ ) . '/includes/class-language-abilities.php';
 
 CloseHub_Content_Abilities::register();
 CloseHub_Site_Abilities::register();
+CloseHub_Language_Abilities::register();
 CloseHub_Network::register();
 
 $config = [ 'tools' => [ 'mcp-adapter/discover-abilities' ] ];
@@ -52,6 +54,10 @@ $expected = [
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',
 	'closehub/clear-cache',
+	'closehub/list-languages',
+	'closehub/add-language',
+	'closehub/set-default-language',
+	'closehub/duplicate-post',
 	'closehub/list-sites',
 ];
 

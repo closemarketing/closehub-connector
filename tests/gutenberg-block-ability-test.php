@@ -52,6 +52,8 @@ function serialize_blocks( array $blocks ): string {
 	}, $blocks ) );
 }
 
+function is_multisite(): bool { return false; }
+require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 
 // get-post exposes raw post_content, so its permission callback must use the

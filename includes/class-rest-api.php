@@ -307,24 +307,33 @@ class CloseHub_REST_API {
 	//
 	// CloseHub_Content_Abilities builds a WP_REST_Request and calls these
 	// instead of a route callback (an MCP ability's execute_callback never
-	// sees a WP_REST_Response to unwrap), but must still fan out across a
-	// multisite network the same way the /posts and /woocommerce/orders
-	// routes do — hence run() rather than calling the *_data() builders
-	// directly, which stay private per this repo's REST API convention.
+	// sees a WP_REST_Response to unwrap). The *_data() builders stay private
+	// per this repo's REST API convention.
+	//
+	// CloseHub_Network picks the site(s) an MCP ability runs on and switches to
+	// each one, so these wrappers act on the current site only — fanning out
+	// again here would repeat the write on every site once per target site.
 
-	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	/** @return array|WP_Error */
 	public function create_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
-		return $this->run( fn() => $this->create_post_data( $request ), null, $permission_callback );
+		return $this->run_on_current_site( fn() => $this->create_post_data( $request ), $permission_callback );
 	}
 
-	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	/** @return array|WP_Error */
 	public function update_post_for_mcp( WP_REST_Request $request, callable $permission_callback ): array|WP_Error {
-		return $this->run( fn() => $this->update_post_data( $request ), null, $permission_callback );
+		return $this->run_on_current_site( fn() => $this->update_post_data( $request ), $permission_callback );
 	}
 
-	/** @return array|WP_Error Same shape as respond() before rest_ensure_response() wraps it. */
+	/** @return array|WP_Error */
 	public function get_woocommerce_orders_for_mcp( WP_REST_Request $request ): array|WP_Error {
-		return $this->run( fn() => $this->get_woocommerce_orders_data( $request ) );
+		return $this->run_on_current_site( fn() => $this->get_woocommerce_orders_data( $request ) );
+	}
+
+	private function run_on_current_site( callable $data_builder, ?callable $permission_callback = null ): array|WP_Error {
+		if ( null !== $permission_callback && ! $permission_callback() ) {
+			return new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action.', [ 'status' => 403 ] );
+		}
+		return $data_builder();
 	}
 
 	public function list_forms(): WP_REST_Response|WP_Error {

@@ -25,6 +25,8 @@ function wp_register_ability_category( string $id, array $args ): bool { return 
 function wp_register_ability( string $id, array $args ): bool { $GLOBALS['closehub_slug_abilities'][ $id ] = $args; return true; }
 function absint( $value ): int { return abs( (int) $value ); }
 
+function is_multisite(): bool { return false; }
+require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 
 $result = CloseHub_Content_Abilities::update_post_slug( [ 'post_id' => 2788, 'slug' => 'New Slug' ] );

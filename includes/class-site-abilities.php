@@ -92,9 +92,9 @@ class CloseHub_Site_Abilities {
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
 		wp_register_ability( $id, [
-			'label' => $label, 'description' => $description, 'category' => 'closehub-site',
-			'input_schema' => [ 'type' => 'object', 'properties' => $properties, 'required' => $required ],
-			'execute_callback' => $execute, 'permission_callback' => $permission,
+			'label' => $label, 'description' => CloseHub_Network::description( $id, $description ), 'category' => 'closehub-site',
+			'input_schema' => [ 'type' => 'object', 'properties' => CloseHub_Network::input_properties( $id, $properties ), 'required' => CloseHub_Network::required( $id, $required ) ],
+			'execute_callback' => CloseHub_Network::execute( $id, $execute, $permission ), 'permission_callback' => CloseHub_Network::permission( $id, $permission ),
 			'meta' => [ 'show_in_rest' => true, 'mcp' => [ 'public' => true ], 'annotations' => [ 'readonly' => $readonly, 'destructive' => $destructive, 'idempotent' => $idempotent ] ],
 		] );
 	}
@@ -375,7 +375,12 @@ class CloseHub_Site_Abilities {
 
 		$active = get_option( 'active_plugins', [] );
 		if ( is_multisite() ) {
-			$active = array_unique( array_merge( $active, array_keys( (array) get_site_option( 'active_sitewide_plugins', [] ) ) ) );
+			// Server-wide result: a plugin active on any one subsite is in use, not just on the current site.
+			$active = array_merge( $active, array_keys( (array) get_site_option( 'active_sitewide_plugins', [] ) ) );
+			foreach ( get_sites( [ 'number' => 0, 'fields' => 'ids' ] ) as $site_id ) {
+				$active = array_merge( $active, (array) get_blog_option( (int) $site_id, 'active_plugins', [] ) );
+			}
+			$active = array_unique( $active );
 		}
 
 		$plugins = [];

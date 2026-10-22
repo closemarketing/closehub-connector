@@ -12,11 +12,15 @@ function add_filter( string $hook, callable $callback, int $priority = 10 ): voi
 }
 function wp_register_ability(): void {}
 
+require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 require_once dirname( __DIR__ ) . '/includes/class-site-abilities.php';
+require_once dirname( __DIR__ ) . '/includes/class-language-abilities.php';
 
 CloseHub_Content_Abilities::register();
 CloseHub_Site_Abilities::register();
+CloseHub_Language_Abilities::register();
+CloseHub_Network::register();
 
 $config = [ 'tools' => [ 'mcp-adapter/discover-abilities' ] ];
 foreach ( $GLOBALS['closehub_test_filters']['mcp_adapter_default_server_config'] as $callbacks ) {
@@ -35,6 +39,8 @@ $expected = [
 	'closehub/update-post-slug',
 	'closehub/replace-gutenberg-block',
 	'closehub/trash-post',
+	'closehub/link-translations',
+	'closehub/unlink-translation',
 	'closehub/get-order-summary',
 	'closehub/search-replace-domain',
 	'closehub/set-robots-txt',
@@ -48,6 +54,11 @@ $expected = [
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',
 	'closehub/clear-cache',
+	'closehub/list-languages',
+	'closehub/add-language',
+	'closehub/set-default-language',
+	'closehub/duplicate-post',
+	'closehub/list-sites',
 ];
 
 if ( $expected !== $config['tools'] ) {

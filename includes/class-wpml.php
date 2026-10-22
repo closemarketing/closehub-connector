@@ -60,4 +60,474 @@ class CloseHub_WPML {
 		}
 		return [ 'language' => (string) $details->language_code, 'translation_group' => isset( $details->trid ) ? (int) $details->trid : null, 'source_language' => $details->source_language_code ?? null ];
 	}
+
+	/** @var array<string, array<int, array{post_id:int, language:string, source_language:?string}>> Group members keyed by "blog:trid" (trids repeat between the WPML tables of different sites). */
+	private static array $members_cache = [];
+
+	private static function cache_key( int $trid ): string {
+		return get_current_blog_id() . ':' . $trid;
+	}
+
+	private static function element_type( WP_Post $post ): string {
+		return (string) apply_filters( 'wpml_element_type', $post->post_type );
+	}
+
+	private static function raw_details( WP_Post $post ): ?object {
+		$details = apply_filters( 'wpml_element_language_details', null, [ 'element_id' => $post->ID, 'element_type' => self::element_type( $post ) ] );
+		return is_object( $details ) && ! empty( $details->language_code ) ? $details : null;
+	}
+
+	/** Every element of one translation group, read straight from icl_translations so the active language filter never hides one. */
+	private static function members( int $trid, string $element_type ): array {
+		$key = self::cache_key( $trid );
+		if ( ! isset( self::$members_cache[ $key ] ) ) {
+			global $wpdb;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT element_id, language_code, source_language_code FROM {$wpdb->prefix}icl_translations WHERE trid = %d AND element_type = %s AND element_id IS NOT NULL ORDER BY language_code", $trid, $element_type ) );
+			self::$members_cache[ $key ] = array_map(
+				static fn( $row ): array => [ 'post_id' => (int) $row->element_id, 'language' => (string) $row->language_code, 'source_language' => empty( $row->source_language_code ) ? null : (string) $row->source_language_code ],
+				(array) $rows
+			);
+		}
+		return self::$members_cache[ $key ];
+	}
+
+	/** Load the translation groups of many posts with one query (list-posts would otherwise run one per post). */
+	public static function prefetch( array $posts ): void {
+		if ( ! has_filter( 'wpml_element_language_details' ) || ! $posts ) {
+			return;
+		}
+		global $wpdb;
+		$trids = [];
+		$type  = '';
+		foreach ( $posts as $post ) {
+			$details = $post instanceof WP_Post ? self::raw_details( $post ) : null;
+			if ( $details && ! empty( $details->trid ) && ! isset( self::$members_cache[ self::cache_key( (int) $details->trid ) ] ) ) {
+				$trids[ (int) $details->trid ] = (int) $details->trid;
+				$type = self::element_type( $post );
+			}
+		}
+		if ( ! $trids ) {
+			return;
+		}
+		$placeholders = implode( ',', array_fill( 0, count( $trids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT trid, element_id, language_code, source_language_code FROM {$wpdb->prefix}icl_translations WHERE element_type = %s AND element_id IS NOT NULL AND trid IN ($placeholders) ORDER BY language_code", array_merge( [ $type ], array_values( $trids ) ) ) );
+		foreach ( $trids as $trid ) {
+			self::$members_cache[ self::cache_key( $trid ) ] = [];
+		}
+		foreach ( (array) $rows as $row ) {
+			self::$members_cache[ self::cache_key( (int) $row->trid ) ][] = [ 'post_id' => (int) $row->element_id, 'language' => (string) $row->language_code, 'source_language' => empty( $row->source_language_code ) ? null : (string) $row->source_language_code ];
+		}
+	}
+
+	/** All translations of a post, itself included, as [ language, post_id, translation_group, status ]. */
+	public static function translations( int $post_id ): array {
+		$post = get_post( $post_id );
+		if ( ! $post || ! has_filter( 'wpml_element_language_details' ) ) {
+			return [];
+		}
+		$details = self::raw_details( $post );
+		if ( ! $details || empty( $details->trid ) ) {
+			return [];
+		}
+		$trid = (int) $details->trid;
+		return array_map(
+			static fn( array $member ): array => [ 'language' => $member['language'], 'post_id' => $member['post_id'], 'translation_group' => $trid, 'status' => (string) get_post_status( $member['post_id'] ) ],
+			self::members( $trid, self::element_type( $post ) )
+		);
+	}
+
+	private static function refresh( array $post_ids ): void {
+		self::$members_cache = [];
+		foreach ( array_unique( $post_ids ) as $id ) {
+			clean_post_cache( (int) $id );
+		}
+	}
+
+	private static function is_translatable( WP_Post $post ): bool {
+		return ! has_filter( 'wpml_is_translated_post_type' ) || (bool) apply_filters( 'wpml_is_translated_post_type', false, $post->post_type );
+	}
+
+	private static function result( int $post_id, ?int $previous_trid, array $affected ): array {
+		$details = self::details( $post_id );
+		return [
+			'post_id'                    => $post_id,
+			'language'                   => $details['language'] ?? '',
+			'source_language'            => $details['source_language'] ?? null,
+			'translation_group'          => $details['translation_group'] ?? null,
+			'previous_translation_group' => $previous_trid,
+			'translations'               => self::translations( $post_id ),
+			'affected_post_ids'          => array_values( array_unique( array_map( 'intval', $affected ) ) ),
+		];
+	}
+
+	/**
+	 * Attach an existing post to the translation group of $translation_of. Never creates or edits content.
+	 * With $force, an existing translation in that language is detached and a post that is itself the source of other translations may be moved.
+	 */
+	public static function link( int $post_id, int $translation_of, string $language, bool $force = false ): array|WP_Error {
+		$language = $language ? self::validate( $language, $translation_of ) : new WP_Error( 'closehub_invalid_language', 'language is required to link translations.', [ 'status' => 400 ] );
+		if ( is_wp_error( $language ) ) {
+			return $language;
+		}
+		if ( ! $post_id || $post_id === $translation_of ) {
+			return new WP_Error( 'closehub_invalid_translation_link', 'post_id and translation_of must be two different posts.', [ 'status' => 400 ] );
+		}
+		$post   = get_post( $post_id );
+		$source = get_post( $translation_of );
+		if ( ! $post || ! $source ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+		if ( $post->post_type !== $source->post_type ) {
+			return new WP_Error( 'closehub_post_type_mismatch', 'post_id and translation_of must have the same post type.', [ 'status' => 400 ] );
+		}
+		if ( ! self::is_translatable( $post ) ) {
+			return new WP_Error( 'closehub_post_type_not_translatable', sprintf( 'The "%s" post type is not translatable in WPML.', $post->post_type ), [ 'status' => 400 ] );
+		}
+		$source_details = self::raw_details( $source );
+		if ( ! $source_details || empty( $source_details->trid ) ) {
+			return new WP_Error( 'closehub_invalid_translation_source', 'translation_of has no WPML language details.', [ 'status' => 400 ] );
+		}
+		if ( ! empty( $source_details->source_language_code ) ) {
+			return new WP_Error( 'closehub_translation_source_not_original', 'translation_of is itself a translation; use the original post as the source.', [ 'status' => 400 ] );
+		}
+		if ( $source_details->language_code === $language ) {
+			return new WP_Error( 'closehub_invalid_translation_source', 'translation_of must be in a different language than language.', [ 'status' => 400 ] );
+		}
+		$details = self::raw_details( $post );
+		if ( $details && $details->language_code !== $language ) {
+			return new WP_Error( 'closehub_language_mismatch', sprintf( 'Post %d is in "%s", not "%s". Its language is never changed by linking.', $post_id, $details->language_code, $language ), [ 'status' => 409 ] );
+		}
+		$element_type = self::element_type( $post );
+		$new_trid     = (int) $source_details->trid;
+		$old_trid     = $details && ! empty( $details->trid ) ? (int) $details->trid : null;
+		$new_members  = self::members( $new_trid, $element_type );
+		$affected     = array_merge( [ $post_id, $translation_of ], array_column( $new_members, 'post_id' ) );
+
+		if ( $old_trid === $new_trid && $details && (string) ( $details->source_language_code ?? '' ) === (string) $source_details->language_code ) {
+			return self::result( $post_id, $old_trid, $affected ) + [ 'changed' => false ];
+		}
+
+		$detached = null;
+		foreach ( $new_members as $member ) {
+			if ( $member['language'] === $language && $member['post_id'] !== $post_id ) {
+				if ( ! $force ) {
+					return new WP_Error( 'closehub_translation_conflict', sprintf( 'Post %d is already the "%s" translation of this group. Pass force=true to detach it, or unlink it first.', $member['post_id'], $language ), [ 'status' => 409, 'conflicting_post_id' => $member['post_id'] ] );
+				}
+				$detached = $member['post_id'];
+			}
+		}
+		if ( $old_trid && $old_trid !== $new_trid ) {
+			$old_members = self::members( $old_trid, $element_type );
+			$affected    = array_merge( $affected, array_column( $old_members, 'post_id' ) );
+			$dependents  = array_filter( $old_members, static fn( array $m ): bool => $m['post_id'] !== $post_id && $m['source_language'] === $language );
+			if ( $dependents && ! $force ) {
+				return new WP_Error( 'closehub_translation_has_dependents', sprintf( 'Post %d is the source of other translations (%s). Pass force=true to move it anyway, leaving them in the old group.', $post_id, implode( ', ', array_column( $dependents, 'post_id' ) ) ), [ 'status' => 409, 'dependent_post_ids' => array_values( array_column( $dependents, 'post_id' ) ) ] );
+			}
+		}
+
+		if ( $detached ) {
+			$detached_post = get_post( $detached );
+			$detach        = $detached_post ? self::detach( $detached_post ) : null;
+			if ( is_wp_error( $detach ) ) {
+				return $detach;
+			}
+		}
+		do_action( 'wpml_set_element_language_details', [ 'element_id' => $post_id, 'element_type' => $element_type, 'trid' => $new_trid, 'language_code' => $language, 'source_language_code' => $source_details->language_code ] );
+		self::refresh( $affected );
+
+		$result = self::result( $post_id, $old_trid, $affected );
+		if ( (int) ( $result['translation_group'] ?? 0 ) !== $new_trid ) {
+			return new WP_Error( 'closehub_translation_link_failed', 'WPML did not apply the translation link.', [ 'status' => 500 ] );
+		}
+		return $result + [ 'changed' => true ] + ( $detached ? [ 'detached_post_id' => $detached ] : [] );
+	}
+
+	/**
+	 * Posts whose WPML relationship a forced link would change besides the two named ones: the translation it
+	 * detaches from the target group and the translations that depend on the post being moved.
+	 *
+	 * @return int[]
+	 */
+	public static function forced_link_collateral( int $post_id, int $translation_of, string $language ): array {
+		$post   = get_post( $post_id );
+		$source = get_post( $translation_of );
+		if ( ! $post || ! $source || ! has_filter( 'wpml_element_language_details' ) ) {
+			return [];
+		}
+		$source_details = self::raw_details( $source );
+		$details        = self::raw_details( $post );
+		if ( ! $source_details || empty( $source_details->trid ) ) {
+			return [];
+		}
+		$element_type = self::element_type( $post );
+		$ids          = [];
+		foreach ( self::members( (int) $source_details->trid, $element_type ) as $member ) {
+			if ( $member['language'] === $language && $member['post_id'] !== $post_id ) {
+				$ids[] = $member['post_id'];
+			}
+		}
+		if ( $details && ! empty( $details->trid ) && (int) $details->trid !== (int) $source_details->trid ) {
+			foreach ( self::members( (int) $details->trid, $element_type ) as $member ) {
+				if ( $member['post_id'] !== $post_id && $member['source_language'] === $language ) {
+					$ids[] = $member['post_id'];
+				}
+			}
+		}
+		return array_values( array_unique( $ids ) );
+	}
+
+	/** Move one post into a translation group of its own, keeping its language. */
+	private static function detach( WP_Post $post ): bool|WP_Error {
+		$details = self::raw_details( $post );
+		if ( ! $details ) {
+			return new WP_Error( 'closehub_post_not_translatable', 'Post has no WPML language details.', [ 'status' => 400 ] );
+		}
+		// A false trid makes WPML allocate the new translation group itself (no unlocked MAX(trid) + 1 here).
+		do_action( 'wpml_set_element_language_details', [ 'element_id' => $post->ID, 'element_type' => self::element_type( $post ), 'trid' => false, 'language_code' => (string) $details->language_code, 'source_language_code' => null ] );
+		self::$members_cache = [];
+		return true;
+	}
+
+	/** Split a translation off its group. The original (source) post of a group cannot be unlinked while translations remain. */
+	public static function unlink( int $post_id ): array|WP_Error {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+		if ( ! has_filter( 'wpml_element_language_details' ) ) {
+			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to unlink translations.', [ 'status' => 400 ] );
+		}
+		$details = self::raw_details( $post );
+		if ( ! $details || empty( $details->trid ) ) {
+			return new WP_Error( 'closehub_post_not_translatable', 'Post has no WPML language details.', [ 'status' => 400 ] );
+		}
+		$old_trid = (int) $details->trid;
+		$members  = self::members( $old_trid, self::element_type( $post ) );
+		$others   = array_filter( $members, static fn( array $m ): bool => $m['post_id'] !== $post_id );
+		if ( ! $others ) {
+			return new WP_Error( 'closehub_translation_not_linked', 'Post is not linked to any other translation.', [ 'status' => 409 ] );
+		}
+		if ( empty( $details->source_language_code ) ) {
+			return new WP_Error( 'closehub_translation_is_source', 'Post is the original of this group. Unlink its translations instead.', [ 'status' => 409, 'translation_post_ids' => array_values( array_column( $others, 'post_id' ) ) ] );
+		}
+		$affected = array_column( $members, 'post_id' );
+		$detached = self::detach( $post );
+		if ( is_wp_error( $detached ) ) {
+			return $detached;
+		}
+		self::refresh( $affected );
+		return self::result( $post_id, $old_trid, $affected );
+	}
+
+	// ── Language management ────────────────────────────────────────────────────
+
+	/** The global SitePress instance, or a WP_Error when WPML is not active. */
+	/** @return object|WP_Error */
+	private static function sitepress(): mixed {
+		global $sitepress;
+		if ( ! is_object( $sitepress ) || ! has_filter( 'wpml_active_languages' ) ) {
+			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to manage languages.', [ 'status' => 400 ] );
+		}
+		return $sitepress;
+	}
+
+	public static function default_language(): string {
+		return (string) apply_filters( 'wpml_default_language', null );
+	}
+
+	/**
+	 * Active languages (code, name, native name, default flag) and, with
+	 * $include_available, the WPML-supported languages not yet activated.
+	 */
+	public static function languages( bool $include_available = false ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$default = self::default_language();
+		$active  = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		$out     = [];
+		foreach ( $active as $code => $language ) {
+			$out[] = [
+				'code'        => (string) $code,
+				'name'        => (string) ( $language['translated_name'] ?? $language['native_name'] ?? $code ),
+				'native_name' => (string) ( $language['native_name'] ?? $code ),
+				'locale'      => (string) ( $language['default_locale'] ?? '' ),
+				'default'     => (string) $code === $default,
+			];
+		}
+		$result = [ 'default_language' => $default, 'languages' => $out ];
+
+		if ( $include_available ) {
+			$available = [];
+			foreach ( self::supported_languages( $sitepress ) as $code => $language ) {
+				if ( ! isset( $active[ $code ] ) ) {
+					$available[] = [ 'code' => (string) $code, 'name' => (string) ( $language['english_name'] ?? $code ), 'native_name' => (string) ( $language['native_name'] ?? $code ), 'locale' => (string) ( $language['default_locale'] ?? '' ) ];
+				}
+			}
+			$result['available_languages'] = $available;
+		}
+		return $result;
+	}
+
+	/** @return array<string, array<string, mixed>> Every language WPML supports, keyed by code. */
+	private static function supported_languages( object $sitepress ): array {
+		return method_exists( $sitepress, 'get_languages' ) ? (array) $sitepress->get_languages( false, false, true ) : [];
+	}
+
+	/** Activate a WPML-supported language. Existing content is not touched. */
+	public static function add_language( string $code ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$code      = sanitize_key( $code );
+		$supported = self::supported_languages( $sitepress );
+		if ( '' === $code || ! isset( $supported[ $code ] ) ) {
+			return new WP_Error( 'closehub_invalid_language', 'The language code is not supported by WPML. Use list-languages with include_available to see the valid codes.', [ 'status' => 400 ] );
+		}
+		$active = array_keys( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ) );
+		if ( in_array( $code, $active, true ) ) {
+			return [ 'language' => $code, 'added' => false ] + (array) self::languages();
+		}
+		if ( ! method_exists( $sitepress, 'set_active_languages' ) || ! $sitepress->set_active_languages( array_merge( $active, [ $code ] ) ) ) {
+			return new WP_Error( 'closehub_language_add_failed', 'WPML could not activate the language.', [ 'status' => 500 ] );
+		}
+		if ( method_exists( $sitepress, 'get_active_languages' ) ) {
+			$sitepress->get_active_languages( true ); // Refresh WPML's cached language list.
+		}
+		return [ 'language' => $code, 'added' => true ] + (array) self::languages();
+	}
+
+	/** Make an already active language the site's default language. */
+	public static function set_default_language( string $code ): array|WP_Error {
+		$sitepress = self::sitepress();
+		if ( is_wp_error( $sitepress ) ) {
+			return $sitepress;
+		}
+		$code   = sanitize_key( $code );
+		$active = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		if ( '' === $code || ! isset( $active[ $code ] ) ) {
+			return new WP_Error( 'closehub_invalid_language', 'The language must be an active WPML language. Add it first with add-language.', [ 'status' => 400 ] );
+		}
+		$previous = self::default_language();
+		if ( $previous === $code ) {
+			return [ 'language' => $code, 'previous_default' => $previous, 'changed' => false ];
+		}
+		if ( ! method_exists( $sitepress, 'set_default_language' ) ) {
+			return new WP_Error( 'closehub_language_default_failed', 'This WPML version cannot change the default language.', [ 'status' => 500 ] );
+		}
+		$sitepress->set_default_language( $code );
+		if ( self::default_language() !== $code ) {
+			return new WP_Error( 'closehub_language_default_failed', 'WPML did not change the default language.', [ 'status' => 500 ] );
+		}
+		return [ 'language' => $code, 'previous_default' => $previous, 'changed' => true ];
+	}
+
+	/**
+	 * Copy an existing post into another language as a new draft linked to it
+	 * as a translation. Uses WPML's own duplication (which keeps the copy
+	 * flagged as a duplicate and copies terms/meta) and falls back to a plain
+	 * copy of the post and its meta when that API is unavailable. With
+	 * $link = false the copy is created in the target language but kept in a
+	 * translation group of its own (no link to the original).
+	 */
+	public static function duplicate( int $post_id, string $language, bool $link = true ): array|WP_Error {
+		$valid = self::validate( $language, $post_id );
+		if ( is_wp_error( $valid ) ) {
+			return $valid;
+		}
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+		if ( ! self::is_translatable( $post ) ) {
+			return new WP_Error( 'closehub_post_type_not_translatable', sprintf( 'The "%s" post type is not translatable in WPML.', $post->post_type ), [ 'status' => 400 ] );
+		}
+		$details = self::raw_details( $post );
+		if ( ! $details || empty( $details->trid ) ) {
+			return new WP_Error( 'closehub_invalid_translation_source', 'The post has no WPML language details.', [ 'status' => 400 ] );
+		}
+		if ( ! empty( $details->source_language_code ) ) {
+			return new WP_Error( 'closehub_translation_source_not_original', 'The post is itself a translation; duplicate the original post instead.', [ 'status' => 400 ] );
+		}
+		if ( $details->language_code === $valid ) {
+			return new WP_Error( 'closehub_invalid_language', 'The target language must differ from the post\'s language.', [ 'status' => 400 ] );
+		}
+		$trid = (int) $details->trid;
+		foreach ( self::members( $trid, self::element_type( $post ) ) as $member ) {
+			if ( $member['language'] === $valid ) {
+				return new WP_Error( 'closehub_translation_conflict', sprintf( 'Post %d is already the "%s" translation of this post.', $member['post_id'], $valid ), [ 'status' => 409, 'conflicting_post_id' => $member['post_id'] ] );
+			}
+		}
+
+		global $sitepress;
+		$new_id = 0;
+		if ( $link && is_object( $sitepress ) && method_exists( $sitepress, 'make_duplicate' ) ) {
+			$made = $sitepress->make_duplicate( $post_id, $valid );
+			if ( is_wp_error( $made ) ) {
+				return $made;
+			}
+			$new_id = (int) $made;
+			// WPML copies the source status; the ability promises drafts, and the caller may not be allowed to publish.
+			if ( $new_id && 'draft' !== get_post_status( $new_id ) ) {
+				wp_update_post( [ 'ID' => $new_id, 'post_status' => 'draft' ] );
+			}
+		}
+		if ( ! $new_id ) {
+			$new_id = self::copy_post( $post, $valid, $link );
+			if ( is_wp_error( $new_id ) ) {
+				return $new_id;
+			}
+		}
+		self::refresh( [ $post_id, $new_id ] );
+
+		$result = self::result( $new_id, null, array_merge( [ $post_id, $new_id ], array_column( self::members( $trid, self::element_type( $post ) ), 'post_id' ) ) );
+		if ( $result['language'] !== $valid || $link !== ( (int) ( $result['translation_group'] ?? 0 ) === $trid ) ) {
+			wp_delete_post( $new_id, true );
+			self::refresh( [ $post_id, $new_id ] );
+			return new WP_Error( 'closehub_duplicate_failed', 'WPML did not apply the duplicate in the requested language and link state; the copy was removed.', [ 'status' => 500 ] );
+		}
+		return $result + [ 'duplicated_from' => $post_id, 'linked' => $link ];
+	}
+
+	/** Fallback copy: a draft with the same content and (non-WPML) meta, then linked as a translation. */
+	private static function copy_post( WP_Post $post, string $language, bool $link ): int|WP_Error {
+		$new_id = wp_insert_post( [
+			'post_title'   => $post->post_title,
+			'post_content' => $post->post_content,
+			'post_excerpt' => $post->post_excerpt,
+			'post_type'    => $post->post_type,
+			'post_status'  => 'draft',
+			'post_author'  => $post->post_author,
+		], true );
+		if ( is_wp_error( $new_id ) ) {
+			return $new_id;
+		}
+		foreach ( (array) get_post_meta( $post->ID ) as $key => $values ) {
+			if ( str_starts_with( (string) $key, '_icl_' ) || in_array( $key, [ '_edit_lock', '_edit_last', '_wp_old_slug' ], true ) ) {
+				continue;
+			}
+			foreach ( (array) $values as $value ) {
+				add_post_meta( $new_id, (string) $key, wp_slash( maybe_unserialize( $value ) ) );
+			}
+		}
+		foreach ( get_object_taxonomies( $post->post_type ) as $taxonomy ) {
+			$term_ids = wp_get_object_terms( $post->ID, $taxonomy, [ 'fields' => 'ids' ] );
+			if ( is_wp_error( $term_ids ) || ! $term_ids ) {
+				continue;
+			}
+			// Prefer each term's translation in the target language; fall back to the original term.
+			$term_ids = array_map( static fn( $term_id ): int => (int) apply_filters( 'wpml_object_id', (int) $term_id, $taxonomy, true, $language ), $term_ids );
+			wp_set_object_terms( $new_id, array_values( array_unique( $term_ids ) ), $taxonomy );
+		}
+		$assigned = self::assign( $new_id, $language, $link ? $post->ID : 0 );
+		if ( is_wp_error( $assigned ) ) {
+			wp_delete_post( $new_id, true );
+			return $assigned;
+		}
+		return $new_id;
+	}
 }

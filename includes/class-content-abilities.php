@@ -12,6 +12,8 @@ class CloseHub_Content_Abilities {
 		'closehub/update-post-slug',
 		'closehub/replace-gutenberg-block',
 		'closehub/trash-post',
+		'closehub/link-translations',
+		'closehub/unlink-translation',
 		'closehub/get-order-summary',
 	];
 
@@ -67,6 +69,17 @@ class CloseHub_Content_Abilities {
 			'block'               => [ 'type' => 'string' ],
 			], [ 'post_id', 'block_path', 'expected_block_name', 'expected_content_hash', 'block' ], true );
 		self::ability( 'closehub/trash-post', 'Trash post', 'Send an existing post, page, product, or other supported content item to the WordPress trash without permanently deleting it.', [ self::class, 'trash_post' ], [ self::class, 'can_delete_post' ], false, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ], true );
+		self::ability( 'closehub/link-translations', 'Link translations', 'Link two EXISTING posts as WPML translations of each other without creating or editing content. post_id is attached to the translation group of translation_of (the original), in the given language. Rejects a language mismatch, different post types, or an existing translation in that language unless force is true. Purges the page cache of the affected posts.', [ self::class, 'link_translations' ], [ self::class, 'can_link_translations' ], false, true, [
+			'post_id'        => [ 'type' => 'integer', 'description' => 'Existing post to attach as the translation.' ],
+			'translation_of' => [ 'type' => 'integer', 'description' => 'Existing original (source language) post.' ],
+			'language'       => [ 'type' => 'string', 'description' => 'WPML language code post_id is in.' ],
+			'force'          => [ 'type' => 'boolean', 'default' => false, 'description' => 'Detach an existing translation in that language, and allow moving a post that is the source of other translations.' ],
+			'clear_cache'    => [ 'type' => 'boolean', 'default' => true ],
+		], [ 'post_id', 'translation_of', 'language' ] );
+		self::ability( 'closehub/unlink-translation', 'Unlink translation', 'Split a WPML translation off its translation group into a group of its own without touching content. The original post of a group cannot be unlinked while it has translations.', [ self::class, 'unlink_translation' ], [ self::class, 'can_edit_post' ], false, true, [
+			'post_id'     => [ 'type' => 'integer' ],
+			'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
+		], [ 'post_id' ] );
 		self::ability( 'closehub/get-order-summary', 'Get WooCommerce order summary', 'Get order count, total sales, average order value, and orders for a date range.', [ self::class, 'get_order_summary' ], [ self::class, 'can_manage_woocommerce' ], true, true, [ 'after' => [ 'type' => 'string' ], 'before' => [ 'type' => 'string' ], 'status' => [ 'type' => 'string', 'default' => 'completed,processing' ] ], [ 'after', 'before' ], false, 'closehub-commerce' );
 	}
 
@@ -81,7 +94,7 @@ class CloseHub_Content_Abilities {
 
 	private static function post_fields( bool $creating ): array {
 		$fields = [ 'post_id' => [ 'type' => 'integer' ], 'title' => [ 'type' => 'string' ], 'content' => [ 'type' => 'string' ], 'excerpt' => [ 'type' => 'string' ], 'status' => [ 'type' => 'string', 'enum' => [ 'draft', 'publish', 'pending' ] ], 'categories' => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ], 'featured_image_url' => [ 'type' => 'string' ], 'seo_title' => [ 'type' => 'string' ], 'seo_description' => [ 'type' => 'string' ], 'seo_focus_keyword' => [ 'type' => 'string' ] ];
-		if ( $creating ) { $fields['status']['default'] = 'draft'; $fields['post_type'] = [ 'type' => 'string', 'default' => 'post' ]; $fields['language'] = [ 'type' => 'string' ]; $fields['translation_of'] = [ 'type' => 'integer' ]; }
+		if ( $creating ) { $fields['status']['default'] = 'draft'; $fields['post_type'] = [ 'type' => 'string', 'default' => 'post' ]; $fields['language'] = [ 'type' => 'string' ]; $fields['translation_of'] = [ 'type' => 'integer' ]; unset( $fields['post_id'] ); }
 		return $fields;
 	}
 
@@ -91,6 +104,7 @@ class CloseHub_Content_Abilities {
 		$post_id = absint( $input['post_id'] ?? 0 );
 		return current_user_can( 'edit_post', $post_id ) && ( 'publish' !== ( $input['status'] ?? '' ) || self::type_cap( get_post_type( $post_id ) ?: 'post', 'publish_posts' ) );
 	}
+	public static function can_link_translations( $input ): bool { return current_user_can( 'edit_post', absint( $input['post_id'] ?? 0 ) ) && current_user_can( 'edit_post', absint( $input['translation_of'] ?? 0 ) ); }
 	public static function can_delete_post( $input ): bool { return current_user_can( 'delete_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_manage_woocommerce(): bool { return current_user_can( 'manage_woocommerce' ); }
 	public static function can_upload_media(): bool { return current_user_can( 'upload_files' ); }
@@ -110,7 +124,14 @@ class CloseHub_Content_Abilities {
 		$page = max( 1, absint( $input['page'] ?? 1 ) );
 		$args = [ 'post_type' => $post_type, 'post_status' => $input['status'] ?? 'publish', 'perm' => 'readable', 's' => sanitize_text_field( $input['search'] ?? '' ), 'paged' => $page, 'posts_per_page' => min( 100, max( 1, absint( $input['per_page'] ?? 20 ) ) ) ];
 		if ( ! empty( $input['language'] ) ) { $args['lang'] = sanitize_key( $input['language'] ); }
+		$previous_language = null;
+		if ( ! empty( $input['language'] ) && has_filter( 'wpml_current_language' ) ) {
+			$previous_language = apply_filters( 'wpml_current_language', null );
+			do_action( 'wpml_switch_language', sanitize_key( $input['language'] ) ); // WPML filters queries by its current language, not by a "lang" argument. "all" is valid.
+		}
 		$query = new WP_Query( $args );
+		if ( null !== $previous_language ) { do_action( 'wpml_switch_language', $previous_language ); }
+		CloseHub_WPML::prefetch( $query->posts );
 		return [ 'posts' => array_map( [ self::class, 'post_data' ], $query->posts ), 'page' => $page, 'total' => (int) $query->found_posts, 'total_pages' => (int) $query->max_num_pages ];
 	}
 
@@ -121,6 +142,9 @@ class CloseHub_Content_Abilities {
 
 	public static function create_post( $input ): array|WP_Error {
 		$input = is_array( $input ) ? $input : [];
+		if ( ! empty( $input['post_id'] ) ) {
+			return new WP_Error( 'closehub_create_post_id_unsupported', 'create-post always creates a new post and does not accept post_id. Use update-post to edit an existing post, or link-translations to link existing posts as translations.', [ 'status' => 400 ] );
+		}
 		$post_type = sanitize_key( $input['post_type'] ?? 'post' );
 		if ( ! CloseHub_REST_API::post_type_allowed( $post_type ) ) {
 			return new WP_Error( 'closehub_post_type_not_allowed', sprintf( 'The "%s" post type is not available.', $post_type ), [ 'status' => 400 ] );
@@ -134,6 +158,42 @@ class CloseHub_Content_Abilities {
 		$permission_input['post_type'] = $post_type;
 		$permission_input['status']    = $request->get_param( 'status' );
 		return ( new CloseHub_REST_API() )->create_post_for_mcp( $request, fn() => self::can_create_post( $permission_input ) );
+	}
+
+	public static function link_translations( $input ): array|WP_Error {
+		$input          = is_array( $input ) ? $input : [];
+		$post_id        = absint( $input['post_id'] ?? 0 );
+		$translation_of = absint( $input['translation_of'] ?? 0 );
+		foreach ( [ $post_id, $translation_of ] as $id ) {
+			$post = get_post( $id );
+			if ( ! $post || ! CloseHub_REST_API::post_type_allowed( $post->post_type ) ) {
+				return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+			}
+		}
+		$result = CloseHub_WPML::link( $post_id, $translation_of, sanitize_key( $input['language'] ?? '' ), ! empty( $input['force'] ) );
+		return is_wp_error( $result ) ? $result : self::finish_translation_change( $result, $input );
+	}
+
+	public static function unlink_translation( $input ): array|WP_Error {
+		$input   = is_array( $input ) ? $input : [];
+		$post_id = absint( $input['post_id'] ?? 0 );
+		$post    = get_post( $post_id );
+		if ( ! $post || ! CloseHub_REST_API::post_type_allowed( $post->post_type ) ) {
+			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
+		}
+		$result = CloseHub_WPML::unlink( $post_id );
+		return is_wp_error( $result ) ? $result : self::finish_translation_change( $result, $input );
+	}
+
+	/** Linking changes hreflang and language switchers on every post of both groups, so purge them (opt out with clear_cache=false). */
+	private static function finish_translation_change( array $result, array $input ): array {
+		$ids = $result['affected_post_ids'];
+		unset( $result['affected_post_ids'] );
+		if ( ( $input['clear_cache'] ?? true ) && ( $result['changed'] ?? true ) ) {
+			$cache = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'posts', 'post_ids' => $ids ] );
+			$result['cache'] = is_wp_error( $cache ) ? [ 'cleared' => false, 'reason' => $cache->get_error_message() ] : $cache;
+		}
+		return $result;
 	}
 
 	public static function update_post( $input ): array|WP_Error {
@@ -417,6 +477,8 @@ class CloseHub_Content_Abilities {
 
 	private static function post_data( WP_Post $post, bool $full = false ): array {
 		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + CloseHub_WPML::details( $post->ID );
+		$translations = CloseHub_WPML::translations( $post->ID );
+		if ( $translations ) { $data['translations'] = $translations; }
 		if ( $full ) {
 			$categories = is_object_in_taxonomy( $post->post_type, 'category' ) ? wp_get_post_categories( $post->ID, [ 'fields' => 'names' ] ) : [];
 			$data += [ 'content' => $post->post_content, 'content_hash' => hash( 'sha256', $post->post_content ), 'excerpt' => $post->post_excerpt, 'categories' => $categories ] + CloseHub_REST_API::cms_metadata( $post->ID );

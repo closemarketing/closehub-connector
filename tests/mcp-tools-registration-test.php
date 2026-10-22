@@ -37,6 +37,8 @@ $expected = [
 	'closehub/update-post-slug',
 	'closehub/replace-gutenberg-block',
 	'closehub/trash-post',
+	'closehub/link-translations',
+	'closehub/unlink-translation',
 	'closehub/get-order-summary',
 	'closehub/search-replace-domain',
 	'closehub/set-robots-txt',

@@ -36,6 +36,8 @@ class CloseHub_Network {
 		'closehub/update-post-slug'        => self::TARGETED,
 		'closehub/replace-gutenberg-block' => self::TARGETED,
 		'closehub/trash-post'              => self::TARGETED,
+		'closehub/link-translations'       => self::TARGETED,
+		'closehub/unlink-translation'      => self::TARGETED,
 		'closehub/search-replace-domain'   => self::TARGETED,
 		'closehub/set-robots-txt'          => self::TARGETED,
 		'closehub/set-post-noindex'        => self::TARGETED,

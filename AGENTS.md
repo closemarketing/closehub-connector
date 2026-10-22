@@ -74,6 +74,8 @@ Abilities are wrapped at registration by `CloseHub_Network::execute()` / `permis
 
 Ability callbacks stay single-site (`switch_to_blog()` is done by the wrapper); never fan out inside a callback. Capabilities are checked per site after switching. On a single site the wrapper is a pass-through.
 
+Abilities registered by **other plugins** (`rank-math/*`, `wp-rocket/*`, `imagify/*`, `woocommerce/*`, `meta-box/*`…) are wrapped automatically on multisite by `CloseHub_Network::wrap_external_ability()`, hooked to `wp_register_ability_args`. They become `targeted`: `site_id` is added to the input schema, results are tagged with `site_id`/`site_url` (non-associative results go under `result`), and the output schema is widened to match. `closehub/`, `mcp-adapter/` and `core/` abilities are skipped; return `false` from the `closehub_network_wrap_ability` filter to opt another one out. Caveat: a plugin that caches its settings in memory per request (not via `get_option()`) can return the main site's values after `switch_to_blog()`; verify such abilities on a real network.
+
 ## Key classes
 
 ### `CloseHub_API_Key` (`includes/class-api-key.php`)

@@ -55,6 +55,9 @@ class CloseHub_Network {
 		'closehub/update-plugins-and-core' => self::ONCE,
 	];
 
+	/** Ability namespaces that wrap_external_ability() never touches. */
+	private const UNWRAPPED_NAMESPACES = [ 'closehub/', 'mcp-adapter/', 'core/' ];
+
 	private const MCP_TOOL_ABILITIES = [ 'closehub/list-sites' ];
 
 	/** Targeted is the safe default for any ability not listed above. */
@@ -69,6 +72,82 @@ class CloseHub_Network {
 
 		add_action( 'wp_abilities_api_init', [ self::class, 'register_abilities' ] );
 		add_filter( 'mcp_adapter_default_server_config', [ self::class, 'add_tools_to_default_server' ] );
+		add_filter( 'wp_register_ability_args', [ self::class, 'wrap_external_ability' ], 20, 2 );
+	}
+
+	/**
+	 * Make abilities registered by other plugins (Rank Math, WP Rocket, Imagify, WooCommerce…) multisite-aware.
+	 *
+	 * Those abilities only ever see the site the MCP endpoint lives on. On a network they are wrapped as
+	 * `targeted`: a required `site_id` is added to the input schema and the callbacks run after switch_to_blog().
+	 * Abilities from `closehub/` (already wrapped), `mcp-adapter/` and `core/` are left alone, as is everything
+	 * on a single site. Return false from `closehub_network_wrap_ability` to opt an ability out.
+	 *
+	 * @param array<string, mixed> $args Ability arguments.
+	 */
+	public static function wrap_external_ability( array $args, string $ability_id ): array {
+		if ( ! is_multisite() || self::TARGETED !== self::scope( $ability_id ) || isset( $args['meta']['closehub_network'] ) ) {
+			return $args;
+		}
+		foreach ( self::UNWRAPPED_NAMESPACES as $namespace ) {
+			if ( str_starts_with( $ability_id, $namespace ) ) {
+				return $args;
+			}
+		}
+		if ( ! apply_filters( 'closehub_network_wrap_ability', true, $ability_id ) ) {
+			return $args;
+		}
+		if ( ! isset( $args['execute_callback'], $args['permission_callback'] ) || ! is_callable( $args['execute_callback'] ) || ! is_callable( $args['permission_callback'] ) ) {
+			return $args;
+		}
+
+		$input_schema = $args['input_schema'] ?? [];
+		if ( [] !== $input_schema && ! in_array( $input_schema['type'] ?? 'object', [ 'object' ], true ) ) {
+			return $args; // Non-object input has nowhere to carry site_id.
+		}
+
+		$had_input  = [] !== $input_schema;
+		$execute    = $args['execute_callback'];
+		$permission = $args['permission_callback'];
+
+		$args['input_schema']               = [ 'type' => 'object' ] + $input_schema;
+		$args['input_schema']['properties'] = self::input_properties( $ability_id, (array) ( $input_schema['properties'] ?? [] ) );
+		if ( ! empty( $args['output_schema'] ) ) {
+			$args['output_schema'] = self::output_schema_with_site( $args['output_schema'] );
+		}
+		if ( isset( $args['description'] ) ) {
+			$args['description'] = self::description( $ability_id, (string) $args['description'] );
+		}
+		$args['meta']['closehub_network'] = true;
+
+		// Abilities without an input schema receive null from WordPress; keep that once site_id is stripped.
+		$restore_null = static fn( $input ) => ( $had_input || ! empty( $input ) ) ? $input : null;
+		$run_permission              = static fn( $input = null ) => $permission( $restore_null( $input ) );
+		$args['execute_callback']    = self::execute( $ability_id, static fn( $input = null ) => $execute( $restore_null( $input ) ), $run_permission );
+		$args['permission_callback'] = self::permission( $ability_id, $run_permission );
+
+		return $args;
+	}
+
+	/** Output schema that also allows the `site_id` / `site_url` that a targeted result is tagged with. */
+	private static function output_schema_with_site( array $schema ): array {
+		$site = [
+			'site_id'  => [ 'type' => 'integer' ],
+			'site_url' => [ 'type' => 'string' ],
+		];
+		if ( 'object' === ( $schema['type'] ?? null ) ) {
+			$schema['properties'] = (array) ( $schema['properties'] ?? [] ) + $site;
+			return $schema;
+		}
+		return [ 'type' => 'object', 'properties' => $site + [ 'result' => $schema ] ];
+	}
+
+	/** Tag a targeted result with its site; results that are not an associative array go under `result`. */
+	private static function tag_result( array $entry, mixed $data ): array {
+		if ( is_array( $data ) && ( [] === $data || ! array_is_list( $data ) ) ) {
+			return $entry + $data;
+		}
+		return $entry + [ 'result' => $data ];
 	}
 
 	public static function add_tools_to_default_server( array $config ): array {
@@ -167,7 +246,7 @@ class CloseHub_Network {
 				}
 
 				if ( self::TARGETED === $scope ) {
-					return is_wp_error( $data ) ? $data : $entry + $data;
+					return is_wp_error( $data ) ? $data : self::tag_result( $entry, $data );
 				}
 				$entries[] = is_wp_error( $data ) ? $entry + [ 'error' => $data->get_error_message() ] : $entry + $data;
 			}

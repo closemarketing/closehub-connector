@@ -131,6 +131,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.
 * Fixed OAuth PKCE parameters being lost when an authorization request passed through the WordPress login screen.
 * Fixed Bearer authentication behind PHP-FPM and reverse proxies that expose the Authorization header outside the standard WordPress server variables.
+* Added multisite support to MCP abilities from other plugins (Rank Math, WP Rocket, Imagify, WooCommerce, Meta Box…): on a network they now take a required `site_id` and run on that site, so redirections, SEO settings and more can be read and changed per subsite.
 * Added multisite support to MCP abilities: fan-out across the network or a single site via `site_id` / `site_ids`, per-site permission checks, and a new `closehub/list-sites` ability.
 * Added WPML language management abilities: `list-languages`, `add-language`, `set-default-language` and `duplicate-post` (linked or unlinked copies).
 * Fixed `closehub/update-post` applying the same post ID on every site of a network.

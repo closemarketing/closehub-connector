@@ -57,7 +57,7 @@ class CloseHub_Site_Abilities {
 			'content' => [ 'type' => 'string' ],
 		], [ 'content' ] );
 
-		self::ability( 'closehub/set-post-noindex', 'Set post noindex', 'Set or clear the noindex robots meta for one post/page using the active SEO plugin (Rank Math or Yoast).', [ self::class, 'set_post_noindex' ], [ self::class, 'can_edit_post_meta' ], false, true, [
+		self::ability( 'closehub/set-post-noindex', 'Set post noindex', 'Set or clear the noindex robots meta for one post/page using the active SEO plugin (Rank Math, Yoast or SEOPress).', [ self::class, 'set_post_noindex' ], [ self::class, 'can_edit_post_meta' ], false, true, [
 			'post_id' => [ 'type' => 'integer' ], 'noindex' => [ 'type' => 'boolean' ],
 		], [ 'post_id', 'noindex' ] );
 
@@ -85,7 +85,7 @@ class CloseHub_Site_Abilities {
 			'email' => [ 'type' => 'string' ], 'username' => [ 'type' => 'string' ], 'role' => [ 'type' => 'string', 'enum' => [ 'administrator', 'editor' ], 'default' => 'editor' ], 'send_notification' => [ 'type' => 'boolean', 'default' => true ],
 		], [ 'email' ] );
 
-		self::ability( 'closehub/clear-cache', 'Clear site cache', 'Purge the page cache of the active caching plugin (currently WP Rocket). Can clear the whole site or only specific posts.', [ self::class, 'clear_cache' ], [ self::class, 'can_clear_cache' ], false, true, [
+		self::ability( 'closehub/clear-cache', 'Clear site cache', 'Purge the page cache of the active caching plugin (WP Rocket or LiteSpeed Cache). Can clear the whole site or only specific posts.', [ self::class, 'clear_cache' ], [ self::class, 'can_clear_cache' ], false, true, [
 			'scope' => [ 'type' => 'string', 'enum' => [ 'all', 'posts' ], 'default' => 'all' ], 'post_ids' => [ 'type' => 'array', 'items' => [ 'type' => 'integer' ] ], 'minify' => [ 'type' => 'boolean', 'default' => false ],
 		] );
 	}
@@ -242,8 +242,11 @@ class CloseHub_Site_Abilities {
 			update_post_meta( $post_id, 'rank_math_robots', $noindex ? [ 'noindex' ] : [] );
 		} elseif ( defined( 'WPSEO_VERSION' ) ) {
 			update_post_meta( $post_id, '_yoast_wpseo_meta-robots-noindex', $noindex ? '1' : '0' );
+		} elseif ( defined( 'SEOPRESS_VERSION' ) ) {
+			// SEOPress stores 'yes' when the per-post noindex checkbox is ticked and drops the meta otherwise.
+			$noindex ? update_post_meta( $post_id, '_seopress_robots_index', 'yes' ) : delete_post_meta( $post_id, '_seopress_robots_index' );
 		} else {
-			return new WP_Error( 'closehub_seo_plugin_missing', 'No supported SEO plugin (Rank Math or Yoast) is active.', [ 'status' => 503 ] );
+			return new WP_Error( 'closehub_seo_plugin_missing', 'No supported SEO plugin (Rank Math, Yoast or SEOPress) is active.', [ 'status' => 503 ] );
 		}
 
 		return [ 'post_id' => $post_id, 'noindex' => $noindex ];
@@ -542,6 +545,11 @@ class CloseHub_Site_Abilities {
 				'is_active' => static fn(): bool => function_exists( 'rocket_clean_domain' ) && function_exists( 'rocket_clean_post' ),
 				'purge'     => [ self::class, 'purge_wp_rocket' ],
 			],
+			'litespeed' => [
+				'label'     => 'LiteSpeed Cache',
+				'is_active' => static fn(): bool => defined( 'LSCWP_V' ) && has_action( 'litespeed_purge_all' ) && has_action( 'litespeed_purge_post' ),
+				'purge'     => [ self::class, 'purge_litespeed' ],
+			],
 		] );
 	}
 
@@ -583,6 +591,39 @@ class CloseHub_Site_Abilities {
 				rocket_clean_minify();
 				$result['minify_cleared'] = true;
 			}
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Uses LiteSpeed Cache's public `litespeed_purge_*` actions only. LiteSpeed
+	 * queues purges and sends them to the server as an X-LiteSpeed-Purge header
+	 * when this request ends, so "cleared" means the purge was queued.
+	 */
+	public static function purge_litespeed( string $scope, array $post_ids, bool $minify ): array {
+		$result = [ 'cleared' => false, 'post_ids' => [], 'failed_post_ids' => [] ];
+
+		if ( 'all' === $scope ) {
+			// purge_all also clears LiteSpeed's combined/minified CSS/JS.
+			do_action( 'litespeed_purge_all', 'CloseHub clear-cache' );
+			$result['cleared'] = true;
+		} else {
+			foreach ( $post_ids as $post_id ) {
+				// litespeed_purge_post silently ignores posts outside these statuses.
+				if ( in_array( get_post_status( $post_id ), [ 'publish', 'trash', 'private', 'draft' ], true ) ) {
+					do_action( 'litespeed_purge_post', $post_id );
+					$result['post_ids'][] = $post_id;
+				} else {
+					$result['failed_post_ids'][] = $post_id;
+				}
+			}
+			$result['cleared'] = (bool) $result['post_ids'];
+		}
+
+		if ( $minify ) {
+			// LiteSpeed has no public action to clear only CSS/JS; purge_all is the one that does it.
+			$result['minify_cleared'] = 'all' === $scope;
 		}
 
 		return $result;

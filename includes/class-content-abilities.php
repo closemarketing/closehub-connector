@@ -80,7 +80,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	private static function post_fields( bool $creating ): array {
-		$fields = [ 'post_id' => [ 'type' => 'integer' ], 'title' => [ 'type' => 'string' ], 'content' => [ 'type' => 'string' ], 'excerpt' => [ 'type' => 'string' ], 'status' => [ 'type' => 'string', 'enum' => [ 'draft', 'publish', 'pending' ] ], 'categories' => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ], 'featured_image_url' => [ 'type' => 'string' ], 'seo_title' => [ 'type' => 'string' ], 'seo_description' => [ 'type' => 'string' ], 'seo_focus_keyword' => [ 'type' => 'string' ] ];
+		$fields = [ 'post_id' => [ 'type' => 'integer' ], 'title' => [ 'type' => 'string' ], 'content' => [ 'type' => 'string' ], 'excerpt' => [ 'type' => 'string' ], 'parent_id' => [ 'type' => 'integer', 'minimum' => 0, 'description' => 'Parent post ID for hierarchical post types such as page. Use 0 to move to the top level.' ], 'status' => [ 'type' => 'string', 'enum' => [ 'draft', 'publish', 'pending' ] ], 'categories' => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ], 'featured_image_url' => [ 'type' => 'string' ], 'seo_title' => [ 'type' => 'string' ], 'seo_description' => [ 'type' => 'string' ], 'seo_focus_keyword' => [ 'type' => 'string' ] ];
 		if ( $creating ) { $fields['status']['default'] = 'draft'; $fields['post_type'] = [ 'type' => 'string', 'default' => 'post' ]; $fields['language'] = [ 'type' => 'string' ]; $fields['translation_of'] = [ 'type' => 'integer' ]; }
 		return $fields;
 	}
@@ -416,7 +416,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	private static function post_data( WP_Post $post, bool $full = false ): array {
-		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + CloseHub_WPML::details( $post->ID );
+		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + ( is_post_type_hierarchical( $post->post_type ) ? [ 'parent_id' => (int) $post->post_parent ] : [] ) + CloseHub_WPML::details( $post->ID );
 		if ( $full ) {
 			$categories = is_object_in_taxonomy( $post->post_type, 'category' ) ? wp_get_post_categories( $post->ID, [ 'fields' => 'names' ] ) : [];
 			$data += [ 'content' => $post->post_content, 'content_hash' => hash( 'sha256', $post->post_content ), 'excerpt' => $post->post_excerpt, 'categories' => $categories ] + CloseHub_REST_API::cms_metadata( $post->ID );

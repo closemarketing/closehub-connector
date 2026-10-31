@@ -20,6 +20,7 @@ class CloseHub_REST_API {
 				'title'   => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				'content' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
 				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'parent_id' => [ 'required' => false, 'type' => 'integer', 'minimum' => 0 ],
 				'featured_image_url' => [
 					'required'          => false,
 					'type'              => 'string',
@@ -62,6 +63,7 @@ class CloseHub_REST_API {
 				'title'   => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				'content' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'wp_kses_post' ],
 				'excerpt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_textarea_field' ],
+				'parent_id' => [ 'required' => false, 'type' => 'integer', 'minimum' => 0 ],
 				'featured_image_url' => [
 					'required'          => false,
 					'type'              => 'string',
@@ -362,6 +364,11 @@ class CloseHub_REST_API {
 			return $categories_error;
 		}
 
+		$parent_id = $this->parent_id_for( $post_type, $request );
+		if ( is_wp_error( $parent_id ) ) {
+			return $parent_id;
+		}
+
 		$requested_status = $request->get_param( 'status' );
 		$language         = (string) ( $request->get_param( 'language' ) ?? '' );
 		$translation_of   = absint( $request->get_param( 'translation_of' ) );
@@ -372,13 +379,17 @@ class CloseHub_REST_API {
 
 		// Keep the post non-public while its metadata is being saved. This makes
 		// every publication hook see the final categories, thumbnail, and SEO data.
-		$post_id = wp_insert_post( [
+		$post_args = [
 			'post_title'   => $request->get_param( 'title' ),
 			'post_content' => $request->get_param( 'content' ),
 			'post_excerpt' => $request->get_param( 'excerpt' ) ?? '',
 			'post_status'  => 'draft',
 			'post_type'    => $post_type,
-		], true );
+		];
+		if ( null !== $parent_id ) {
+			$post_args['post_parent'] = $parent_id;
+		}
+		$post_id = wp_insert_post( $post_args, true );
 
 		if ( is_wp_error( $post_id ) ) {
 			return $post_id;
@@ -426,7 +437,15 @@ class CloseHub_REST_API {
 			return $categories_error;
 		}
 
+		$parent_id = $this->parent_id_for( $post->post_type, $request, $post_id );
+		if ( is_wp_error( $parent_id ) ) {
+			return $parent_id;
+		}
+
 		$fields = [ 'ID' => $post_id ];
+		if ( null !== $parent_id ) {
+			$fields['post_parent'] = $parent_id;
+		}
 		foreach ( [
 			'title'   => 'post_title',
 			'content' => 'post_content',
@@ -492,8 +511,38 @@ class CloseHub_REST_API {
 	}
 
 	/** Post id/link plus whichever SEO and featured-image data is stored for it. */
+	/**
+	 * Validate the optional parent_id param. Returns null when it was not sent
+	 * (leave the parent untouched), 0 to move to the top level, or the parent ID.
+	 */
+	private function parent_id_for( string $post_type, WP_REST_Request $request, int $post_id = 0 ): int|WP_Error|null {
+		$param = $request->get_param( 'parent_id' );
+		if ( null === $param || '' === $param ) {
+			return null;
+		}
+		if ( ! is_post_type_hierarchical( $post_type ) ) {
+			return new WP_Error( 'closehub_parent_not_supported', sprintf( 'The "%s" post type is not hierarchical and does not support a parent.', $post_type ), [ 'status' => 400 ] );
+		}
+		$parent_id = absint( $param );
+		if ( 0 === $parent_id ) {
+			return 0;
+		}
+		$parent = get_post( $parent_id );
+		if ( ! $parent || $parent->post_type !== $post_type ) {
+			return new WP_Error( 'closehub_parent_invalid', sprintf( 'The parent must be an existing "%s".', $post_type ), [ 'status' => 400 ] );
+		}
+		if ( $post_id && ( $parent_id === $post_id || in_array( $post_id, get_post_ancestors( $parent_id ), true ) ) ) {
+			return new WP_Error( 'closehub_parent_cycle', 'A post cannot be its own parent or the child of one of its descendants.', [ 'status' => 400 ] );
+		}
+		// The API-key route has no current user; MCP calls run as a real one.
+		if ( get_current_user_id() && ! current_user_can( 'edit_post', $parent_id ) ) {
+			return new WP_Error( 'closehub_parent_forbidden', 'You cannot edit the parent post.', [ 'status' => 403 ] );
+		}
+		return $parent_id;
+	}
+
 	private function post_response( int $post_id ): array {
-		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id );
+		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ), 'parent_id' => (int) wp_get_post_parent_id( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id );
 	}
 
 	/**

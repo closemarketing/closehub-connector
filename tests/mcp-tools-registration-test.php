@@ -44,6 +44,8 @@ $expected = [
 	'closehub/set-site-settings',
 	'closehub/reassign-posts-author',
 	'closehub/install-wp-org-plugin',
+	'closehub/install-plugin-zip',
+	'closehub/install-theme-zip',
 	'closehub/list-unused-plugins',
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',

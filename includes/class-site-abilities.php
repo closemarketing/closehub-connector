@@ -18,6 +18,8 @@ class CloseHub_Site_Abilities {
 		'closehub/set-site-settings',
 		'closehub/reassign-posts-author',
 		'closehub/install-wp-org-plugin',
+		'closehub/install-plugin-zip',
+		'closehub/install-theme-zip',
 		'closehub/list-unused-plugins',
 		'closehub/update-plugins-and-core',
 		'closehub/create-site-user',
@@ -77,6 +79,17 @@ class CloseHub_Site_Abilities {
 			'slug' => [ 'type' => 'string' ],
 		], [ 'slug' ] );
 
+		$zip_properties = [
+			'filename'    => [ 'type' => 'string', 'description' => 'Name of the zip file, e.g. my-plugin.zip.' ],
+			'data_base64' => [ 'type' => 'string', 'description' => 'The zip file contents, base64-encoded. Limited by this site\'s maximum upload size.' ],
+			'overwrite'   => [ 'type' => 'boolean', 'default' => true, 'description' => 'Replace the installed copy when one with the same folder exists, like "Replace current with uploaded" in the admin. When false, an existing copy makes the call fail.' ],
+			'activate'    => [ 'type' => 'boolean', 'default' => false, 'description' => 'Activate it after installing. A replaced item that was already active stays active either way.' ],
+		];
+
+		self::ability( 'closehub/install-plugin-zip', 'Install or replace a plugin from a zip', 'Upload a plugin zip and install it exactly like Plugins > Add New > Upload Plugin, replacing the installed copy when overwrite is true (the default). Does not activate unless activate is true.', [ self::class, 'install_plugin_zip' ], [ self::class, 'can_install_plugins' ], false, true, $zip_properties, [ 'filename', 'data_base64' ], true );
+
+		self::ability( 'closehub/install-theme-zip', 'Install or replace a theme from a zip', 'Upload a theme zip and install it exactly like Appearance > Themes > Add New > Upload Theme, replacing the installed copy when overwrite is true (the default). Does not activate unless activate is true.', [ self::class, 'install_theme_zip' ], [ self::class, 'can_install_themes' ], false, true, $zip_properties, [ 'filename', 'data_base64' ], true );
+
 		self::ability( 'closehub/list-unused-plugins', 'List unused plugins', 'List installed plugins that are not currently active, as candidates for removal.', [ self::class, 'list_unused_plugins' ], [ self::class, 'can_view_plugins' ], true, true, [] );
 
 		self::ability( 'closehub/update-plugins-and-core', 'Update plugins and core', 'Update every plugin with an available update and WordPress core to the latest available version.', [ self::class, 'update_plugins_and_core' ], [ self::class, 'can_update_site' ], false, false, [], [], true );
@@ -105,6 +118,7 @@ class CloseHub_Site_Abilities {
 	public static function can_edit_post_meta( $input ): bool { return current_user_can( 'edit_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_reassign_posts(): bool { return current_user_can( 'edit_others_posts' ); }
 	public static function can_install_plugins(): bool { return current_user_can( 'install_plugins' ); }
+	public static function can_install_themes(): bool { return current_user_can( 'install_themes' ); }
 	public static function can_view_plugins(): bool { return current_user_can( 'activate_plugins' ); }
 	public static function can_update_site(): bool { return current_user_can( 'update_plugins' ) && current_user_can( 'update_core' ); }
 	/** WP Rocket registers rocket_purge_cache so non-admin roles can be allowed to purge; respect it alongside manage_options. */
@@ -366,6 +380,159 @@ class CloseHub_Site_Abilities {
 		}
 
 		return [ 'slug' => $slug, 'plugin_file' => $upgrader->plugin_info(), 'installed' => true, 'activated' => false ];
+	}
+
+	// ── Zip upload (plugins and themes) ─────────────────────────────────────────
+
+	public static function install_plugin_zip( $input ): array|WP_Error {
+		$input = is_array( $input ) ? $input : [];
+		$zip   = self::write_zip_to_temp_file( $input );
+		if ( is_wp_error( $zip ) ) {
+			return $zip;
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+		$activate = ! empty( $input['activate'] );
+		if ( $activate && ! current_user_can( 'activate_plugins' ) ) {
+			wp_delete_file( $zip );
+			return new WP_Error( 'closehub_forbidden', 'You cannot activate plugins.', [ 'status' => 403 ] );
+		}
+
+		$before   = get_plugins();
+		$skin     = new Automatic_Upgrader_Skin();
+		$upgrader = new Plugin_Upgrader( $skin );
+		$result   = $upgrader->install( $zip, [ 'overwrite_package' => self::overwrite_requested( $input ) ] );
+		wp_delete_file( $zip );
+
+		$error = self::upgrader_error( $result, $skin, 'closehub_plugin_zip_install_failed', 'Plugin installation failed.' );
+		if ( $error ) {
+			return $error;
+		}
+
+		$plugin_file = (string) $upgrader->plugin_info();
+		wp_clean_plugins_cache( true );
+		$plugins = get_plugins();
+		$data    = $plugins[ $plugin_file ] ?? [];
+		$output  = [
+			'plugin_file'      => $plugin_file,
+			'name'             => $data['Name'] ?? '',
+			'version'          => $data['Version'] ?? '',
+			'replaced'         => isset( $before[ $plugin_file ] ),
+			'previous_version' => $before[ $plugin_file ]['Version'] ?? null,
+			'activated'        => false,
+		];
+
+		if ( $activate && ! is_plugin_active( $plugin_file ) ) {
+			$activated = activate_plugin( $plugin_file );
+			if ( is_wp_error( $activated ) ) {
+				$output['activation_error'] = $activated->get_error_message();
+				return $output;
+			}
+		}
+		$output['activated'] = is_plugin_active( $plugin_file );
+
+		return $output;
+	}
+
+	public static function install_theme_zip( $input ): array|WP_Error {
+		$input = is_array( $input ) ? $input : [];
+		$zip   = self::write_zip_to_temp_file( $input );
+		if ( is_wp_error( $zip ) ) {
+			return $zip;
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/theme.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+		$activate = ! empty( $input['activate'] );
+		if ( $activate && ! current_user_can( 'switch_themes' ) ) {
+			wp_delete_file( $zip );
+			return new WP_Error( 'closehub_forbidden', 'You cannot switch themes.', [ 'status' => 403 ] );
+		}
+
+		$skin     = new Automatic_Upgrader_Skin();
+		$upgrader = new Theme_Upgrader( $skin );
+		$result   = $upgrader->install( $zip, [ 'overwrite_package' => self::overwrite_requested( $input ) ] );
+		wp_delete_file( $zip );
+
+		$error = self::upgrader_error( $result, $skin, 'closehub_theme_zip_install_failed', 'Theme installation failed.' );
+		if ( $error ) {
+			return $error;
+		}
+
+		$theme = $upgrader->theme_info();
+		if ( ! $theme ) {
+			return new WP_Error( 'closehub_theme_zip_install_failed', 'The theme was installed but could not be read back.', [ 'status' => 500 ] );
+		}
+		$stylesheet = $theme->get_stylesheet();
+		if ( $activate && get_stylesheet() !== $stylesheet ) {
+			switch_theme( $stylesheet );
+		}
+
+		return [
+			'stylesheet' => $stylesheet,
+			'name'       => (string) $theme->get( 'Name' ),
+			'version'    => (string) $theme->get( 'Version' ),
+			'overwrite'  => self::overwrite_requested( $input ),
+			'activated'  => get_stylesheet() === $stylesheet,
+		];
+	}
+
+	private static function overwrite_requested( array $input ): bool {
+		return ! array_key_exists( 'overwrite', $input ) || ! empty( $input['overwrite'] );
+	}
+
+	/**
+	 * Validate the zip payload and write it to a temp file the upgrader can read.
+	 * The caller must delete the returned file.
+	 */
+	private static function write_zip_to_temp_file( array $input ): string|WP_Error {
+		if ( ! wp_is_file_mod_allowed( 'closehub_zip_install' ) ) {
+			return new WP_Error( 'closehub_file_mods_disabled', 'File modifications are disabled on this site (DISALLOW_FILE_MODS).', [ 'status' => 403 ] );
+		}
+		if ( ! isset( $input['filename'] ) || ! is_string( $input['filename'] ) || '' === $input['filename'] ) {
+			return new WP_Error( 'closehub_missing_filename', 'filename is required.', [ 'status' => 400 ] );
+		}
+		if ( ! isset( $input['data_base64'] ) || ! is_string( $input['data_base64'] ) || '' === $input['data_base64'] ) {
+			return new WP_Error( 'closehub_missing_data_base64', 'data_base64 is required.', [ 'status' => 400 ] );
+		}
+		$filename = sanitize_file_name( $input['filename'] );
+		if ( '' === $filename || 'zip' !== strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) ) ) {
+			return new WP_Error( 'closehub_invalid_filename', 'filename must be a .zip file name.', [ 'status' => 400 ] );
+		}
+		$contents = base64_decode( $input['data_base64'], true );
+		if ( false === $contents || '' === $contents ) {
+			return new WP_Error( 'closehub_invalid_data_base64', 'data_base64 must be valid, non-empty base64 data.', [ 'status' => 400 ] );
+		}
+		$max_size = wp_max_upload_size();
+		if ( $max_size <= 0 || strlen( $contents ) > $max_size ) {
+			return new WP_Error( 'closehub_zip_too_large', 'The decoded zip exceeds this site\'s maximum upload size.', [ 'status' => 413 ] );
+		}
+		if ( ! str_starts_with( $contents, "PK\x03\x04" ) ) {
+			return new WP_Error( 'closehub_invalid_zip', 'The uploaded data is not a zip archive.', [ 'status' => 400 ] );
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$path = wp_tempnam( $filename );
+		if ( ! $path || false === file_put_contents( $path, $contents ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			return new WP_Error( 'closehub_zip_write_failed', 'Could not write the zip to a temporary file.', [ 'status' => 500 ] );
+		}
+
+		return $path;
+	}
+
+	private static function upgrader_error( mixed $result, Automatic_Upgrader_Skin $skin, string $code, string $fallback ): ?WP_Error {
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( ! $result ) {
+			$errors  = $skin->get_errors();
+			$message = is_wp_error( $errors ) && $errors->has_errors() ? $errors->get_error_message() : '';
+			return new WP_Error( $code, $message ?: ( implode( ' ', $skin->get_upgrade_messages() ) ?: $fallback ), [ 'status' => 500 ] );
+		}
+		return null;
 	}
 
 	// ── Unused plugins ──────────────────────────────────────────────────────────

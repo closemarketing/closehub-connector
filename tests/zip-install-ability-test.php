@@ -34,6 +34,17 @@ function sanitize_file_name( string $name ): string { return preg_replace( '/[^A
 function wp_max_upload_size(): int { return 1024; }
 function wp_tempnam( string $name ): string { return tempnam( sys_get_temp_dir(), 'chz' ); }
 function wp_delete_file( string $path ): void { @unlink( $path ); }
+function get_current_user_id(): int { return 7; }
+function rest_url( string $path ): string { return 'https://example.com/wp-json/' . $path; }
+function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
+class CloseHub_REST_API {
+	const NAMESPACE = 'closehub/v1';
+}
+class CloseHub_Deploy_Ticket {
+	public const HEADER = 'X-CloseHub-Deploy-Ticket';
+	public static array $issued = [];
+	public static function issue( int $user_id, string $type, string $slug ): array { self::$issued[] = [ $user_id, $type, $slug ]; return [ 'ticket' => 'abc', 'expires_in' => 900 ]; }
+}
 
 require_once dirname( __DIR__ ) . '/includes/class-site-abilities.php';
 // write_zip_to_temp_file() loads wp-admin/includes/file.php for wp_tempnam(), stubbed above.
@@ -86,9 +97,19 @@ if ( ! $invalid instanceof WP_Error ) { $fail( 'An unsafe slug must be rejected.
 CloseHub_Site_Abilities::rollback_package( [ 'type' => 'theme', 'slug' => 'my-theme', 'backup' => 'b.zip' ] );
 if ( [ 'rollback', 'theme', 'my-theme', 'b.zip' ] !== CloseHub_Package_Installer::$calls[2] ) { $fail( 'rollback-package must forward type, slug and backup.' ); }
 
+// create-deploy-ticket: bound to the current user, type and slug, pointing at the upload route.
+$ticket = CloseHub_Site_Abilities::create_deploy_ticket( [ 'type' => 'theme', 'slug' => 'my-theme' ] );
+if ( [ [ 7, 'theme', 'my-theme' ] ] !== CloseHub_Deploy_Ticket::$issued ) { $fail( 'The ticket must be issued for the current user, type and slug.' ); }
+if ( 'abc' !== $ticket['ticket'] || 'https://example.com/wp-json/closehub/v1/packages/install?type=theme&slug=my-theme' !== $ticket['upload_url'] || 'X-CloseHub-Deploy-Ticket' !== $ticket['header'] ) { $fail( 'create-deploy-ticket must return the ticket, upload URL and header.' ); }
+if ( ! CloseHub_Site_Abilities::create_deploy_ticket( [ 'type' => 'theme', 'slug' => '../x' ] ) instanceof WP_Error ) { $fail( 'No ticket for an unsafe slug.' ); }
+$GLOBALS['closehub_test_file_mods'] = false;
+if ( ! CloseHub_Site_Abilities::create_deploy_ticket( [ 'type' => 'theme', 'slug' => 'my-theme' ] ) instanceof WP_Error || 1 !== count( CloseHub_Deploy_Ticket::$issued ) ) { $fail( 'No ticket when file mods are disabled.' ); }
+$GLOBALS['closehub_test_file_mods'] = true;
+
 // Permission callbacks.
-if ( CloseHub_Site_Abilities::can_install_plugins() || CloseHub_Site_Abilities::can_install_themes() || CloseHub_Site_Abilities::can_view_package( [ 'type' => 'theme' ] ) || CloseHub_Site_Abilities::can_replace_package( [ 'type' => 'plugin' ] ) ) { $fail( 'Nothing must be allowed without capabilities.' ); }
+if ( CloseHub_Site_Abilities::can_install_plugins() || CloseHub_Site_Abilities::can_install_themes() || CloseHub_Site_Abilities::can_install_package( [ 'type' => 'theme' ] ) || CloseHub_Site_Abilities::can_view_package( [ 'type' => 'theme' ] ) || CloseHub_Site_Abilities::can_replace_package( [ 'type' => 'plugin' ] ) ) { $fail( 'Nothing must be allowed without capabilities.' ); }
 $GLOBALS['closehub_test_caps'] = [ 'install_themes', 'switch_themes' ];
+if ( ! CloseHub_Site_Abilities::can_install_package( [ 'type' => 'theme' ] ) || CloseHub_Site_Abilities::can_install_package( [ 'type' => 'plugin' ] ) ) { $fail( 'A deploy ticket needs install_* for its type.' ); }
 if ( ! CloseHub_Site_Abilities::can_view_package( [ 'type' => 'theme' ] ) || CloseHub_Site_Abilities::can_replace_package( [ 'type' => 'theme' ] ) ) { $fail( 'Rolling back a theme needs update_themes too.' ); }
 $GLOBALS['closehub_test_caps'] = [ 'install_plugins', 'update_plugins' ];
 if ( ! CloseHub_Site_Abilities::can_replace_package( [ 'type' => 'plugin' ] ) || CloseHub_Site_Abilities::can_view_package( [ 'type' => 'plugin' ] ) ) { $fail( 'Plugin permissions are wrong.' ); }

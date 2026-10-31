@@ -47,6 +47,7 @@ $expected = [
 	'closehub/install-wp-org-plugin',
 	'closehub/install-plugin-zip',
 	'closehub/install-theme-zip',
+	'closehub/create-deploy-ticket',
 	'closehub/get-installed-version',
 	'closehub/rollback-package',
 	'closehub/list-unused-plugins',

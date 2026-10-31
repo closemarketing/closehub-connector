@@ -3,9 +3,12 @@
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Deploy routes for plugins and themes, authenticated as a WordPress user
- * with an application password (HTTP Basic auth), not with the CloseHub API
- * key: installing code is tied to a user and their capabilities.
+ * Deploy route for plugin and theme zips.
+ *
+ * Authenticated with a single-use ticket from the closehub/create-deploy-ticket
+ * ability (see CloseHub_Deploy_Ticket), never with cookies, application
+ * passwords or the CloseHub API key: the ticket is bound to one user, one
+ * type and one slug, and expires after 15 minutes.
  *
  * The zip is sent as multipart/form-data in the "file" field so a script
  * (bin/closehub-deploy) can upload it straight from disk. type, slug and the
@@ -13,8 +16,10 @@ defined( 'ABSPATH' ) || exit;
  * than post_max_size and the error can say so.
  *
  *   POST /wp-json/closehub/v1/packages/install?type=theme&slug=my-theme
- *   GET  /wp-json/closehub/v1/packages/theme/my-theme
- *   POST /wp-json/closehub/v1/packages/rollback?type=theme&slug=my-theme
+ *   X-CloseHub-Deploy-Ticket: <ticket>
+ *
+ * Version checks and rollbacks go through the closehub/get-installed-version
+ * and closehub/rollback-package abilities, which need no upload.
  */
 class CloseHub_Package_REST {
 	public function register(): void {
@@ -22,66 +27,32 @@ class CloseHub_Package_REST {
 	}
 
 	public function register_routes(): void {
-		$flags = [
-			'type'        => [ 'type' => 'string', 'enum' => CloseHub_Package_Installer::TYPES ],
-			'slug'        => [ 'type' => 'string' ],
-			'overwrite'   => [ 'type' => 'boolean', 'default' => true ],
-			'activate'    => [ 'type' => 'boolean', 'default' => false ],
-			'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
-		];
-
 		register_rest_route( CloseHub_REST_API::NAMESPACE, '/packages/install', [
 			'methods'             => WP_REST_Server::CREATABLE,
 			'callback'            => [ $this, 'install' ],
-			'permission_callback' => [ $this, 'can_install' ],
-			'args'                => $flags,
-		] );
-
-		register_rest_route( CloseHub_REST_API::NAMESPACE, '/packages/rollback', [
-			'methods'             => WP_REST_Server::CREATABLE,
-			'callback'            => [ $this, 'rollback' ],
-			'permission_callback' => [ $this, 'can_rollback' ],
-			'args'                => [ 'type' => $flags['type'], 'slug' => $flags['slug'], 'backup' => [ 'type' => 'string', 'default' => '' ] ],
-		] );
-
-		register_rest_route( CloseHub_REST_API::NAMESPACE, '/packages/(?P<type>plugin|theme)/(?P<slug>[A-Za-z0-9._-]+)', [
-			'methods'             => WP_REST_Server::READABLE,
-			'callback'            => [ $this, 'version' ],
-			'permission_callback' => [ $this, 'can_view' ],
+			'permission_callback' => [ $this, 'authorize' ],
+			'args'                => [
+				'type'        => [ 'type' => 'string', 'enum' => CloseHub_Package_Installer::TYPES ],
+				'slug'        => [ 'type' => 'string' ],
+				'overwrite'   => [ 'type' => 'boolean', 'default' => true ],
+				'activate'    => [ 'type' => 'boolean', 'default' => false ],
+				'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
+			],
 		] );
 	}
 
-	// ── Permissions ────────────────────────────────────────────────────────────
-
-	public function can_install( WP_REST_Request $request ): bool|WP_Error {
-		return $this->user_can( 'theme' === $request->get_param( 'type' ) ? 'install_themes' : 'install_plugins' );
-	}
-
-	public function can_rollback( WP_REST_Request $request ): bool|WP_Error {
-		$logged_in = $this->user_can( 'read' );
-		if ( true !== $logged_in ) {
-			return $logged_in;
+	/** Redeem the ticket and act as the user it was issued to, whoever else the request claims to be. */
+	public function authorize( WP_REST_Request $request ): bool|WP_Error {
+		$type    = (string) $request->get_param( 'type' );
+		$user_id = CloseHub_Deploy_Ticket::redeem( (string) $request->get_header( CloseHub_Deploy_Ticket::HEADER ), $type, (string) $request->get_param( 'slug' ) );
+		if ( is_wp_error( $user_id ) ) {
+			return $user_id;
 		}
-		return CloseHub_Site_Abilities::can_replace_package( [ 'type' => $request->get_param( 'type' ) ] ) ? true : $this->forbidden();
-	}
-
-	public function can_view( WP_REST_Request $request ): bool|WP_Error {
-		$logged_in = $this->user_can( 'read' );
-		if ( true !== $logged_in ) {
-			return $logged_in;
+		wp_set_current_user( $user_id );
+		if ( ! current_user_can( 'theme' === $type ? 'install_themes' : 'install_plugins' ) ) {
+			return new WP_Error( 'closehub_forbidden', 'The user who created the ticket can no longer install this package.', [ 'status' => 403 ] );
 		}
-		return CloseHub_Site_Abilities::can_view_package( [ 'type' => $request->get_param( 'type' ) ] ) ? true : $this->forbidden();
-	}
-
-	private function user_can( string $capability ): bool|WP_Error {
-		if ( ! is_user_logged_in() ) {
-			return new WP_Error( 'closehub_unauthorized', 'Authenticate as a WordPress user with an application password (HTTP Basic auth).', [ 'status' => 401 ] );
-		}
-		return current_user_can( $capability ) ? true : $this->forbidden();
-	}
-
-	private function forbidden(): WP_Error {
-		return new WP_Error( 'closehub_forbidden', 'You do not have permission to perform this action.', [ 'status' => 403 ] );
+		return true;
 	}
 
 	// ── Callbacks ──────────────────────────────────────────────────────────────
@@ -104,16 +75,6 @@ class CloseHub_Package_REST {
 			'activate'    => (bool) $request->get_param( 'activate' ),
 			'clear_cache' => (bool) $request->get_param( 'clear_cache' ),
 		] );
-		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
-	}
-
-	public function rollback( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = CloseHub_Package_Installer::rollback( (string) $request->get_param( 'type' ), (string) $request->get_param( 'slug' ), (string) $request->get_param( 'backup' ) );
-		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
-	}
-
-	public function version( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$result = CloseHub_Site_Abilities::get_installed_version( [ 'type' => $request->get_param( 'type' ), 'slug' => $request->get_param( 'slug' ) ] );
 		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
 	}
 

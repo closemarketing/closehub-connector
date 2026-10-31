@@ -1,90 +1,59 @@
 #!/usr/bin/env bash
-# Upload a plugin/theme zip from disk to a site running CloseHub Connector,
-# check the installed version, or roll back. The zip never passes through an
-# AI model: curl reads it from disk.
+# Upload a plugin/theme zip from disk to a site running CloseHub Connector.
+# The zip never passes through an AI model: curl reads it from disk.
 #
-#   closehub-deploy install  <site-url> <plugin|theme> <zip> [--slug S] [--activate] [--no-overwrite] [--no-cache]
-#   closehub-deploy version  <site-url> <plugin|theme> <slug>
-#   closehub-deploy rollback <site-url> <plugin|theme> <slug> [--backup FILE]
+#   CLOSEHUB_DEPLOY_TICKET=<ticket> closehub-deploy <site-url> <plugin|theme> <zip> [--slug S] [--activate] [--no-overwrite] [--no-cache]
 #
-# Credentials (a WordPress application password), first match wins:
-#   1. CLOSEHUB_DEPLOY_USER and CLOSEHUB_DEPLOY_PASSWORD environment variables.
-#   2. macOS Keychain item with service "closehub-deploy:<host>", created with:
-#      security add-generic-password -s "closehub-deploy:example.com" -a "wp-username" -w
+# The ticket comes from the closehub/create-deploy-ticket ability, called for
+# the same type and slug. It is single use and expires after 15 minutes; no
+# password or long-lived key is involved. Check the result and roll back with
+# the closehub/get-installed-version and closehub/rollback-package abilities.
 #
 # Prints the JSON response. Exits 0 on success, 1 on an HTTP or usage error.
 
 set -euo pipefail
 
 die() { echo "closehub-deploy: $*" >&2; exit 1; }
-usage() { sed -n '6,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
+usage() { sed -n '5p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 
-[ $# -ge 4 ] || usage
-command="$1" site="${2%/}" type="$3" target="$4"
-shift 4
+[ $# -ge 3 ] || usage
+site="${1%/}" type="$2" zip="$3"
+shift 3
 case "$type" in plugin|theme) ;; *) die "type must be plugin or theme" ;; esac
-case "$site" in https://*) ;; http://localhost*|http://127.0.0.1*|http://*.test*) ;; *) die "site must be an https:// URL (application passwords need HTTPS)" ;; esac
-host="$(printf '%s' "$site" | sed -E 's#^https?://##; s#/.*$##')"
+case "$site" in https://*) ;; http://localhost*|http://127.0.0.1*|http://*.test*) ;; *) die "site must be an https:// URL" ;; esac
+[ -f "$zip" ] || die "zip not found: $zip"
+ticket="${CLOSEHUB_DEPLOY_TICKET:-}"
+[ -n "$ticket" ] || die "set CLOSEHUB_DEPLOY_TICKET to a ticket from the closehub/create-deploy-ticket ability"
+case "$ticket" in *[!0-9a-f]*) die "CLOSEHUB_DEPLOY_TICKET is not a deploy ticket" ;; esac
 
-slug="" activate=0 overwrite=1 cache=1 backup=""
+slug="" activate=0 overwrite=1 cache=1
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--slug) slug="${2:?--slug needs a value}"; shift 2 ;;
 		--activate) activate=1; shift ;;
 		--no-overwrite) overwrite=0; shift ;;
 		--no-cache) cache=0; shift ;;
-		--backup) backup="${2:?--backup needs a value}"; shift 2 ;;
 		*) die "unknown option $1" ;;
 	esac
 done
 
-user="${CLOSEHUB_DEPLOY_USER:-}"
-password="${CLOSEHUB_DEPLOY_PASSWORD:-}"
-if [ -z "$user" ] || [ -z "$password" ]; then
-	command -v security >/dev/null || die "set CLOSEHUB_DEPLOY_USER and CLOSEHUB_DEPLOY_PASSWORD"
-	service="closehub-deploy:$host"
-	user="$(security find-generic-password -s "$service" 2>/dev/null | awk -F'"' '/"acct"/ { print $4 }')" \
-		|| true
-	password="$(security find-generic-password -s "$service" -w 2>/dev/null)" \
-		|| die "no credentials: add a Keychain item with service \"$service\" or set CLOSEHUB_DEPLOY_USER/CLOSEHUB_DEPLOY_PASSWORD"
-	[ -n "$user" ] || die "the Keychain item \"$service\" has no account (WordPress username)"
-fi
+# Default slug: the file name without -{version}.zip, as built by wdis.
+[ -n "$slug" ] || slug="$(basename "$zip" .zip | sed -E 's/-[0-9]+(\.[0-9]+)*([-.+][0-9A-Za-z.-]+)?$//')"
+# Fail early, before uploading (and burning the ticket), when the zip holds another folder.
+roots="$(unzip -Z1 "$zip" | grep -v '^__MACOSX/' | cut -d/ -f1 | sort -u)"
+[ "$roots" = "$slug" ] || die "the zip must contain only the \"$slug\" folder, found: $(echo "$roots" | tr '\n' ' ')"
 
-api="$site/wp-json/closehub/v1/packages"
+host="$(printf '%s' "$site" | sed -E 's#^https?://##; s#/.*$##')"
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
+echo "Uploading $(basename "$zip") ($(du -h "$zip" | cut -f1 | tr -d ' ')) to $host as $type \"$slug\"..." >&2
 
-# Credentials go to curl through a config on stdin, so they never show up in
-# the process list or shell history.
-call() {
-	local escaped_user escaped_password
-	escaped_user="$(printf '%s' "$user" | sed 's/[\\"]/\\&/g')"
-	escaped_password="$(printf '%s' "$password" | sed 's/[\\"]/\\&/g')"
-	printf 'user = "%s:%s"\n' "$escaped_user" "$escaped_password" \
-		| curl --silent --show-error --config - --output "$body" --write-out '%{http_code}' "$@"
-}
-
-case "$command" in
-	install)
-		zip="$target"
-		[ -f "$zip" ] || die "zip not found: $zip"
-		# Default slug: the file name without -{version}.zip, as built by wdis.
-		[ -n "$slug" ] || slug="$(basename "$zip" .zip | sed -E 's/-[0-9]+(\.[0-9]+)*([-.+][0-9A-Za-z.-]+)?$//')"
-		# Fail early, before uploading, when the zip holds another folder.
-		roots="$(unzip -Z1 "$zip" | grep -v '^__MACOSX/' | cut -d/ -f1 | sort -u)"
-		[ "$roots" = "$slug" ] || die "the zip must contain only the \"$slug\" folder, found: $(echo "$roots" | tr '\n' ' ')"
-		echo "Uploading $(basename "$zip") ($(du -h "$zip" | cut -f1 | tr -d ' ')) to $host as $type \"$slug\"..." >&2
-		status="$(call --request POST --form "file=@$zip;type=application/zip" \
-			"$api/install?type=$type&slug=$slug&overwrite=$overwrite&activate=$activate&clear_cache=$cache")"
-		;;
-	version)
-		status="$(call "$api/$type/$target")"
-		;;
-	rollback)
-		status="$(call --request POST "$api/rollback?type=$type&slug=$target&backup=$backup")"
-		;;
-	*) usage ;;
-esac
+# The ticket goes to curl through a config on stdin, so it never shows up in
+# the process list.
+status="$(printf 'header = "X-CloseHub-Deploy-Ticket: %s"\n' "$ticket" \
+	| curl --silent --show-error --config - --output "$body" --write-out '%{http_code}' \
+		--request POST --form "file=@$zip;type=application/zip" \
+		"$site/wp-json/closehub/v1/packages/install?type=$type&slug=$slug&overwrite=$overwrite&activate=$activate&clear_cache=$cache")"
 
 if command -v jq >/dev/null; then jq . "$body" 2>/dev/null || cat "$body"; else cat "$body"; fi
 echo

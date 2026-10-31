@@ -11,17 +11,13 @@ class WP_REST_Response {
 	public function __construct( public mixed $data = null ) {}
 }
 class WP_REST_Request {
-	public function __construct( private array $params = [], private array $files = [] ) {}
+	public function __construct( private array $params = [], private array $files = [], private array $headers = [] ) {}
 	public function get_param( string $key ) { return $this->params[ $key ] ?? null; }
 	public function get_file_params(): array { return $this->files; }
+	public function get_header( string $key ): ?string { return $this->headers[ strtolower( $key ) ] ?? null; }
 }
 class CloseHub_REST_API {
 	const NAMESPACE = 'closehub/v1';
-}
-class CloseHub_Site_Abilities {
-	public static function can_view_package( $input ): bool { return current_user_can( 'theme' === $input['type'] ? 'switch_themes' : 'activate_plugins' ); }
-	public static function can_replace_package( $input ): bool { return current_user_can( 'update_plugins' ); }
-	public static function get_installed_version( $input ): array { return [ 'slug' => $input['slug'], 'version' => '1.1.2' ]; }
 }
 class CloseHub_Package_Installer {
 	public const TYPES = [ 'plugin', 'theme' ];
@@ -31,16 +27,21 @@ class CloseHub_Package_Installer {
 	public static function valid_slug( string $slug ): bool { return (bool) preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $slug ) && ! str_contains( $slug, '..' ); }
 }
 
-$GLOBALS['closehub_test_logged_in'] = true;
-$GLOBALS['closehub_test_caps']      = [ 'read', 'install_themes', 'install_plugins', 'update_plugins', 'switch_themes' ];
+$GLOBALS['closehub_test_user']       = 0;
+$GLOBALS['closehub_test_caps']       = [ 7 => [ 'install_themes' ] ];
+$GLOBALS['closehub_test_transients'] = [];
 
-function is_user_logged_in(): bool { return $GLOBALS['closehub_test_logged_in']; }
-function current_user_can( string $capability ): bool { return in_array( $capability, $GLOBALS['closehub_test_caps'], true ); }
+function wp_set_current_user( int $id ): void { $GLOBALS['closehub_test_user'] = $id; }
+function current_user_can( string $capability ): bool { return in_array( $capability, $GLOBALS['closehub_test_caps'][ $GLOBALS['closehub_test_user'] ] ?? [], true ); }
+function set_transient( string $key, $value, int $ttl ): bool { $GLOBALS['closehub_test_transients'][ $key ] = $value; return true; }
+function get_transient( string $key ) { return $GLOBALS['closehub_test_transients'][ $key ] ?? false; }
+function delete_transient( string $key ): bool { $found = isset( $GLOBALS['closehub_test_transients'][ $key ] ); unset( $GLOBALS['closehub_test_transients'][ $key ] ); return $found; }
 function is_wp_error( mixed $thing ): bool { return $thing instanceof WP_Error; }
 function rest_ensure_response( $data ): WP_REST_Response { return new WP_REST_Response( $data ); }
 function wp_max_upload_size(): int { return 2048; }
 function size_format( int $bytes ): string { return $bytes . ' B'; }
 
+require_once dirname( __DIR__ ) . '/includes/class-deploy-ticket.php';
 require_once dirname( __DIR__ ) . '/includes/class-package-rest.php';
 
 /** Stands in for PHP's upload handling (only real HTTP uploads pass it) and its php.ini limits. */
@@ -57,17 +58,32 @@ $expect = static function ( $result, string $code, int $status, string $label ) 
 	if ( ! $result instanceof WP_Error || $code !== $result->code || $status !== ( $result->data['status'] ?? 0 ) ) { $fail( "Expected {$code} ({$status}) for {$label}." ); }
 };
 
-// ── Permissions: application password user with the right capabilities ────
-if ( true !== $rest->can_install( new WP_REST_Request( $params ) ) ) { $fail( 'A user with install_themes may install themes.' ); }
-$GLOBALS['closehub_test_logged_in'] = false;
-$expect( $rest->can_install( new WP_REST_Request( $params ) ), 'closehub_unauthorized', 401, 'an anonymous request' );
-$expect( $rest->can_view( new WP_REST_Request( $params ) ), 'closehub_unauthorized', 401, 'an anonymous version check' );
-$GLOBALS['closehub_test_logged_in'] = true;
-$GLOBALS['closehub_test_caps']      = [ 'read' ];
-$expect( $rest->can_install( new WP_REST_Request( $params ) ), 'closehub_forbidden', 403, 'a user without install_themes' );
-$expect( $rest->can_rollback( new WP_REST_Request( $params ) ), 'closehub_forbidden', 403, 'a rollback without update caps' );
-$expect( $rest->can_view( new WP_REST_Request( $params ) ), 'closehub_forbidden', 403, 'a version check without switch_themes' );
-$GLOBALS['closehub_test_caps'] = [ 'read', 'install_themes', 'install_plugins', 'update_plugins', 'switch_themes' ];
+// ── Ticket: single use, bound to user, type and slug ───────────────────────
+$with_ticket = static fn ( string $ticket, array $p = [] ): WP_REST_Request => new WP_REST_Request( $p + $params, [], [ 'x-closehub-deploy-ticket' => $ticket ] );
+
+$expect( $rest->authorize( new WP_REST_Request( $params ) ), 'closehub_deploy_ticket_missing', 401, 'no ticket' );
+$expect( $rest->authorize( $with_ticket( 'not-a-ticket' ) ), 'closehub_deploy_ticket_missing', 401, 'a malformed ticket' );
+$expect( $rest->authorize( $with_ticket( str_repeat( 'a', 64 ) ) ), 'closehub_deploy_ticket_invalid', 401, 'an unknown ticket' );
+
+$issued = CloseHub_Deploy_Ticket::issue( 7, 'theme', 'close-reclamafacturas-theme' );
+if ( ! preg_match( '/^[a-f0-9]{64}$/', $issued['ticket'] ) || 900 !== $issued['expires_in'] ) { $fail( 'A ticket is 64 hex chars and lasts 15 minutes.' ); }
+if ( array_key_exists( 'closehub_deploy_ticket_' . $issued['ticket'], $GLOBALS['closehub_test_transients'] ) || str_contains( serialize( $GLOBALS['closehub_test_transients'] ), $issued['ticket'] ) ) { $fail( 'Only the ticket hash may be stored.' ); }
+if ( true !== $rest->authorize( $with_ticket( $issued['ticket'] ) ) || 7 !== $GLOBALS['closehub_test_user'] ) { $fail( 'A valid ticket must act as the user it was issued to.' ); }
+$expect( $rest->authorize( $with_ticket( $issued['ticket'] ) ), 'closehub_deploy_ticket_invalid', 401, 'a reused ticket' );
+
+$other = CloseHub_Deploy_Ticket::issue( 7, 'theme', 'close-reclamafacturas-theme' );
+$expect( $rest->authorize( $with_ticket( $other['ticket'], [ 'slug' => 'twentytwentyfive' ] ) ), 'closehub_deploy_ticket_mismatch', 403, 'a ticket for another slug' );
+$expect( $rest->authorize( $with_ticket( $other['ticket'] ) ), 'closehub_deploy_ticket_invalid', 401, 'a ticket burned by a mismatch' );
+$plugin = CloseHub_Deploy_Ticket::issue( 7, 'theme', 'my-plugin' );
+$expect( $rest->authorize( $with_ticket( $plugin['ticket'], [ 'type' => 'plugin', 'slug' => 'my-plugin' ] ) ), 'closehub_deploy_ticket_mismatch', 403, 'a theme ticket used for a plugin' );
+
+$expired = CloseHub_Deploy_Ticket::issue( 7, 'theme', 'close-reclamafacturas-theme' );
+foreach ( $GLOBALS['closehub_test_transients'] as &$stored ) { $stored['expires'] = time() - 1; }
+unset( $stored );
+$expect( $rest->authorize( $with_ticket( $expired['ticket'] ) ), 'closehub_deploy_ticket_invalid', 401, 'an expired ticket' );
+
+$demoted = CloseHub_Deploy_Ticket::issue( 8, 'theme', 'close-reclamafacturas-theme' );
+$expect( $rest->authorize( $with_ticket( $demoted['ticket'] ) ), 'closehub_forbidden', 403, 'a user who lost install_themes' );
 
 // ── Upload checks ──────────────────────────────────────────────────────────
 $expect( $rest->install( new WP_REST_Request( [ 'type' => 'theme' ], [ 'file' => $file ] ) ), 'closehub_package_invalid_slug', 400, 'a missing slug' );
@@ -88,10 +104,5 @@ if ( CloseHub_Package_Installer::$calls ) { $fail( 'Rejected uploads must not re
 $response = $rest->install( new WP_REST_Request( [ 'activate' => true ] + $params, [ 'file' => $file ] ) );
 if ( ! $response instanceof WP_REST_Response || '1.1.2' !== $response->data['new_version'] ) { $fail( 'A valid upload should return the installer result.' ); }
 if ( [ 'theme', '/tmp/phpABC123', [ 'slug' => 'close-reclamafacturas-theme', 'overwrite' => true, 'activate' => true, 'clear_cache' => true ] ] !== CloseHub_Package_Installer::$calls[0] ) { $fail( 'The upload and its flags must be forwarded to the installer.' ); }
-
-$rest->rollback( new WP_REST_Request( [ 'type' => 'theme', 'slug' => 'close-reclamafacturas-theme', 'backup' => '' ] ) );
-if ( [ 'rollback', 'theme', 'close-reclamafacturas-theme', '' ] !== CloseHub_Package_Installer::$calls[1] ) { $fail( 'Rollback must forward type, slug and backup.' ); }
-$version = $rest->version( new WP_REST_Request( [ 'type' => 'theme', 'slug' => 'close-reclamafacturas-theme' ] ) );
-if ( '1.1.2' !== $version->data['version'] ) { $fail( 'The version route must return the installed version.' ); }
 
 echo "Package REST checks passed.\n";

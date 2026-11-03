@@ -33,7 +33,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 
 * `closehub/search-replace-domain` (`manage_options`) — Replace `old_domain` with `new_domain` across post content, options, comments, and meta tables, re-serializing serialized values safely. Skips `wp_posts.guid`. Pass `dry_run: true` to preview the number of rows that would change per table without writing anything. Example: `{ "old_domain": "staging.example.com", "new_domain": "example.com" }`.
 * `closehub/set-robots-txt` (`manage_options`) — Write `content` to `robots.txt`, physically if the site root is writable, otherwise served virtually through the `robots_txt` filter. Example: `{ "content": "User-agent: *\nDisallow:\nSitemap: https://example.com/sitemap.xml" }`.
-* `closehub/set-post-noindex` (`edit_post` on the target `post_id`) — Set or clear the noindex robots meta for one post/page using whichever SEO plugin (Rank Math or Yoast) is active. Example: `{ "post_id": 42, "noindex": true }`.
+* `closehub/set-post-noindex` (`edit_post` on the target `post_id`) — Set or clear the noindex robots meta for one post/page using whichever SEO plugin (Rank Math, Yoast or SEOPress) is active. Example: `{ "post_id": 42, "noindex": true }`.
 * `closehub/flush-permalinks` (`manage_options`) — Regenerate rewrite rules, equivalent to `wp rewrite flush`. Takes no parameters.
 * `closehub/get-htaccess` (`manage_options`, read-only) — Return whether `.htaccess` exists and its current content. Takes no parameters.
 * `closehub/set-site-settings` (`manage_options`) — Update the site timezone and/or admin email; at least one is required. Example: `{ "timezone": "Europe/Madrid", "admin_email": "client@example.com" }`.
@@ -70,7 +70,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 **Available endpoints:**
 
 * `GET /closehub/v1/ping` — verify the connection
-* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, categories, and WPML `language`/`translation_of` when WPML is active
+* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math, Yoast or SEOPress), featured image, categories, and WPML `language`/`translation_of` when WPML is active
 * `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
@@ -135,6 +135,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= Unreleased =
+* Added LiteSpeed Cache support to the `closehub/clear-cache` MCP ability, using LiteSpeed's public `litespeed_purge_all` / `litespeed_purge_post` actions. WP Rocket still takes precedence when both are active.
+* Added SEOPress support for SEO title, meta description, and target keyword on post create/update and read-back, and for the `closehub/set-post-noindex` MCP ability.
 
 = 1.3.1 =
 * Added MCP abilities to install or replace a plugin or theme from a zip (`install-plugin-zip`, `install-theme-zip`), with single-use deploy tickets for large uploads (`create-deploy-ticket`), `get-installed-version` and `rollback-package` to restore the backup taken before a replacement.

@@ -41,9 +41,9 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 
 | Method | Endpoint | Class method | Notes |
 |--------|----------|--------------|-------|
-| GET | `/ping` | `ping()` | Returns site name, URL, WP version, plugin version |
+| GET | `/ping` | `ping()` | Returns site name, URL, WP version, plugin version and `capabilities` (`seo_partial_update`: the SEO fields of `PUT /posts/{id}` are updated only when sent) |
 | POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status`, `categories`, `featured_image_url`, `seo_title`, `seo_description`, `seo_focus_keyword` |
-| PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create, all optional here |
+| PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create, all optional here; an omitted `seo_*` field keeps its stored value, an empty string clears it |
 | GET | `/woocommerce/orders` | `get_woocommerce_orders()` | Returns order count, total sales, average order; args: `after`, `before`, `status` |
 | GET | `/gravity-forms/forms` | `list_forms()` | Lists all forms with entry count |
 | GET | `/gravity-forms/forms/{id}` | `get_form()` | Form details + last entry date |

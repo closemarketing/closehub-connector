@@ -350,6 +350,8 @@ class CloseHub_REST_API {
 			'url'                => get_site_url(),
 			'version'            => get_bloginfo( 'version' ),
 			'closehub_connector' => CLOSEHUB_VERSION,
+			// Features a client can rely on without guessing from the version.
+			'capabilities'       => [ 'seo_partial_update' ],
 		];
 	}
 
@@ -692,39 +694,35 @@ class CloseHub_REST_API {
 		return $attachment_id;
 	}
 
-	/** Write SEO fields for whichever supported SEO plugin is active. */
+	/**
+	 * Write the SEO fields that were sent for whichever supported SEO plugin is
+	 * active. A field missing from the request is left as it is, so updating
+	 * only seo_title never blanks the stored description or focus keyword; send
+	 * an empty string to clear one on purpose.
+	 */
 	private function save_seo_metadata( int $post_id, WP_REST_Request $request ): bool|WP_Error {
-		$seo_title         = (string) ( $request->get_param( 'seo_title' ) ?? '' );
-		$seo_description   = (string) ( $request->get_param( 'seo_description' ) ?? '' );
-		$seo_focus_keyword = (string) ( $request->get_param( 'seo_focus_keyword' ) ?? '' );
-
-		if ( defined( 'RANK_MATH_VERSION' ) ) {
-			$result = $this->update_post_meta( $post_id, 'rank_math_title', $seo_title );
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-			$result = $this->update_post_meta( $post_id, 'rank_math_description', $seo_description );
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-			$result = $this->update_post_meta( $post_id, 'rank_math_focus_keyword', $seo_focus_keyword );
-			if ( is_wp_error( $result ) ) {
-				return $result;
+		$fields = [];
+		foreach ( [ 'seo_title', 'seo_description', 'seo_focus_keyword' ] as $param ) {
+			$value = $request->get_param( $param );
+			if ( null !== $value ) {
+				$fields[ $param ] = (string) $value;
 			}
 		}
 
+		$meta_keys = [];
+		if ( defined( 'RANK_MATH_VERSION' ) ) {
+			$meta_keys[] = [ 'seo_title' => 'rank_math_title', 'seo_description' => 'rank_math_description', 'seo_focus_keyword' => 'rank_math_focus_keyword' ];
+		}
 		if ( defined( 'WPSEO_VERSION' ) ) {
-			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_metadesc', $seo_description );
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-			$result = $this->update_post_meta( $post_id, '_yoast_wpseo_focuskw', $seo_focus_keyword );
-			if ( is_wp_error( $result ) ) {
-				return $result;
+			$meta_keys[] = [ 'seo_title' => '_yoast_wpseo_title', 'seo_description' => '_yoast_wpseo_metadesc', 'seo_focus_keyword' => '_yoast_wpseo_focuskw' ];
+		}
+
+		foreach ( $meta_keys as $plugin_keys ) {
+			foreach ( $fields as $param => $value ) {
+				$result = $this->update_post_meta( $post_id, $plugin_keys[ $param ], $value );
+				if ( is_wp_error( $result ) ) {
+					return $result;
+				}
 			}
 		}
 

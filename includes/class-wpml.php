@@ -11,8 +11,8 @@ class CloseHub_WPML {
 		if ( ! has_filter( 'wpml_active_languages' ) ) {
 			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to set a content language.', [ 'status' => 400 ] );
 		}
-		$languages = apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
-		if ( '' === $language || ! is_array( $languages ) || ! isset( $languages[ $language ] ) ) {
+		$languages = self::active_languages();
+		if ( '' === $language || ! isset( $languages[ $language ] ) ) {
 			return new WP_Error( 'closehub_invalid_language', 'The requested WPML language is not active.', [ 'status' => 400 ] );
 		}
 		return $language;
@@ -337,6 +337,65 @@ class CloseHub_WPML {
 		return (string) apply_filters( 'wpml_default_language', null );
 	}
 
+	// WPML loads its settings and active languages once per request, for the site the request started on, and does
+	// not reload them on switch_to_blog(). After CloseHub_Network switches to another site, read that site's own
+	// tables instead, and refuse WPML writes that would save the first site's in-memory settings onto it.
+
+	private static function switched(): bool {
+		return function_exists( 'ms_is_switched' ) && ms_is_switched();
+	}
+
+	/** @return string[]|null Active language codes stored for the current site, or null when they cannot be read. */
+	private static function stored_active_codes(): ?array {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$codes = $wpdb->get_col( "SELECT code FROM {$wpdb->prefix}icl_languages WHERE active = 1" );
+		return is_array( $codes ) && $codes ? array_map( 'strval', $codes ) : null;
+	}
+
+	private static function stored_default_language(): string {
+		$settings = get_option( 'icl_sitepress_settings', [] );
+		return is_array( $settings ) ? (string) ( $settings['default_language'] ?? '' ) : '';
+	}
+
+	/** Whether WPML's in-memory languages belong to the current site (always true unless switched to another site). */
+	private static function state_is_current(): bool {
+		if ( ! self::switched() ) {
+			return true;
+		}
+		$stored = self::stored_active_codes();
+		$memory = array_map( 'strval', array_keys( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ) ) );
+		if ( null === $stored ) {
+			return false;
+		}
+		sort( $stored );
+		sort( $memory );
+		return $stored === $memory && self::stored_default_language() === self::default_language();
+	}
+
+	private static function stale_state_error(): WP_Error {
+		return new WP_Error( 'closehub_wpml_other_site', 'WPML has loaded the language settings of another site of this network in this request, so changing them here could overwrite this site\'s WPML settings. Change this site\'s languages from its own WPML admin.', [ 'status' => 409 ] );
+	}
+
+	/** @return array<string, array<string, mixed>> Active languages of the current site keyed by code, like wpml_active_languages. */
+	private static function active_languages(): array {
+		$active = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		if ( self::state_is_current() ) {
+			return $active;
+		}
+		global $sitepress;
+		$supported = is_object( $sitepress ) ? self::supported_languages( $sitepress ) : [];
+		$out       = [];
+		foreach ( (array) self::stored_active_codes() as $code ) {
+			$out[ $code ] = (array) ( $active[ $code ] ?? $supported[ $code ] ?? [] );
+		}
+		return $out;
+	}
+
+	private static function current_default_language(): string {
+		return self::state_is_current() ? self::default_language() : self::stored_default_language();
+	}
+
 	/**
 	 * Active languages (code, name, native name, default flag) and, with
 	 * $include_available, the WPML-supported languages not yet activated.
@@ -346,8 +405,8 @@ class CloseHub_WPML {
 		if ( is_wp_error( $sitepress ) ) {
 			return $sitepress;
 		}
-		$default = self::default_language();
-		$active  = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		$default = self::current_default_language();
+		$active  = self::active_languages();
 		$out     = [];
 		foreach ( $active as $code => $language ) {
 			$out[] = [
@@ -388,6 +447,9 @@ class CloseHub_WPML {
 		if ( '' === $code || ! isset( $supported[ $code ] ) ) {
 			return new WP_Error( 'closehub_invalid_language', 'The language code is not supported by WPML. Use list-languages with include_available to see the valid codes.', [ 'status' => 400 ] );
 		}
+		if ( ! self::state_is_current() ) {
+			return self::stale_state_error();
+		}
 		$active = array_keys( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ) );
 		if ( in_array( $code, $active, true ) ) {
 			return [ 'language' => $code, 'added' => false ] + (array) self::languages();
@@ -408,9 +470,12 @@ class CloseHub_WPML {
 			return $sitepress;
 		}
 		$code   = sanitize_key( $code );
-		$active = (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+		$active = self::active_languages();
 		if ( '' === $code || ! isset( $active[ $code ] ) ) {
 			return new WP_Error( 'closehub_invalid_language', 'The language must be an active WPML language. Add it first with add-language.', [ 'status' => 400 ] );
+		}
+		if ( ! self::state_is_current() ) {
+			return self::stale_state_error();
 		}
 		$previous = self::default_language();
 		if ( $previous === $code ) {
@@ -428,9 +493,10 @@ class CloseHub_WPML {
 
 	/**
 	 * Copy an existing post into another language as a new draft linked to it
-	 * as a translation. Uses WPML's own duplication (which keeps the copy
-	 * flagged as a duplicate and copies terms/meta) and falls back to a plain
-	 * copy of the post and its meta when that API is unavailable. With
+	 * as a translation. Uses WPML's own duplication (which copies terms/meta;
+	 * the duplicate flag is then dropped so later edits of the original never
+	 * overwrite the translation) and falls back to a plain copy of the post
+	 * and its meta when that API is unavailable. With
 	 * $link = false the copy is created in the target language but kept in a
 	 * translation group of its own (no link to the original).
 	 */
@@ -465,15 +531,27 @@ class CloseHub_WPML {
 
 		global $sitepress;
 		$new_id = 0;
-		if ( $link && is_object( $sitepress ) && method_exists( $sitepress, 'make_duplicate' ) ) {
-			$made = $sitepress->make_duplicate( $post_id, $valid );
+		// WPML's duplication reads its in-memory settings, so it is only used when they belong to this site.
+		if ( $link && is_object( $sitepress ) && method_exists( $sitepress, 'make_duplicate' ) && self::state_is_current() ) {
+			// WPML copies the source status: insert the copy as a draft so publish hooks (emails, sitemaps, autoposting) never fire for it.
+			$force_draft = static fn( array $data ): array => $post->post_type === ( $data['post_type'] ?? '' ) ? array_merge( $data, [ 'post_status' => 'draft' ] ) : $data;
+			add_filter( 'wp_insert_post_data', $force_draft );
+			try {
+				$made = $sitepress->make_duplicate( $post_id, $valid );
+			} finally {
+				remove_filter( 'wp_insert_post_data', $force_draft );
+			}
 			if ( is_wp_error( $made ) ) {
 				return $made;
 			}
 			$new_id = (int) $made;
-			// WPML copies the source status; the ability promises drafts, and the caller may not be allowed to publish.
-			if ( $new_id && 'draft' !== get_post_status( $new_id ) ) {
-				wp_update_post( [ 'ID' => $new_id, 'post_status' => 'draft' ] );
+			if ( $new_id ) {
+				// A WPML "duplicate" is overwritten whenever the original is edited; make it an independent translation
+				// (what "Translate independently" does) so whatever is translated in it is kept.
+				delete_post_meta( $new_id, '_icl_lang_duplicate_of' );
+				if ( 'draft' !== get_post_status( $new_id ) ) {
+					wp_update_post( [ 'ID' => $new_id, 'post_status' => 'draft' ] );
+				}
 			}
 		}
 		if ( ! $new_id ) {
@@ -501,13 +579,14 @@ class CloseHub_WPML {
 			'post_excerpt' => $post->post_excerpt,
 			'post_type'    => $post->post_type,
 			'post_status'  => 'draft',
-			'post_author'  => $post->post_author,
+			'post_author'  => get_current_user_id() ?: $post->post_author,
 		], true );
 		if ( is_wp_error( $new_id ) ) {
 			return $new_id;
 		}
 		foreach ( (array) get_post_meta( $post->ID ) as $key => $values ) {
-			if ( str_starts_with( (string) $key, '_icl_' ) || in_array( $key, [ '_edit_lock', '_edit_last', '_wp_old_slug' ], true ) ) {
+			// WooCommerce's _sku and _global_unique_id (GTIN) must be unique: copying them would create a clashing product.
+			if ( str_starts_with( (string) $key, '_icl_' ) || in_array( $key, [ '_edit_lock', '_edit_last', '_wp_old_slug', '_sku', '_global_unique_id' ], true ) ) {
 				continue;
 			}
 			foreach ( (array) $values as $value ) {

@@ -74,17 +74,18 @@ $ran = [];
 CloseHub_Network::execute( 'closehub/update-plugins-and-core', $callback, $allow )( [] );
 closehub_test_assert( [ 1 ] === $ran, 'A server-wide ability must run once.' );
 
-// ── A translation link never fans out: translation_of needs exactly one site ──
-$ran    = [];
-$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5 ] );
-closehub_test_assert( is_wp_error( $linked ) && 'closehub_site_id_required' === $linked->get_error_code() && [] === $ran, 'translation_of without site_ids must be rejected before running.' );
-$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5, 'site_ids' => [ 2, 3 ] ] );
-closehub_test_assert( is_wp_error( $linked ) && [] === $ran, 'translation_of with several sites must be rejected.' );
-$linked = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'translation_of' => 5, 'site_ids' => [ 2 ] ] );
-closehub_test_assert( [ 2 ] === $ran && ! is_wp_error( $linked ), 'translation_of with one site must run on it.' );
-$ran = [];
-CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'title' => 'x' ] );
-closehub_test_assert( [ 1, 2, 3 ] === $ran, 'create-post without translation_of must still fan out.' );
+// ── create-post is a write: it needs one site_id and never creates a copy on every site ──
+$ran     = [];
+$created = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'title' => 'x' ] );
+closehub_test_assert( is_wp_error( $created ) && 'closehub_site_id_required' === $created->get_error_code() && [] === $ran, 'create-post without site_id must be rejected before running.' );
+$created = CloseHub_Network::execute( 'closehub/create-post', $callback, $allow )( [ 'title' => 'x', 'translation_of' => 5, 'site_id' => 2 ] );
+closehub_test_assert( [ 2 ] === $ran && 2 === $created['site_id'], 'create-post must run only on the chosen site.' );
+
+// ── Fan-out results that are lists or scalars go under `result` instead of being merged into the entry ──
+$result = CloseHub_Network::execute( 'closehub/list-posts', static fn(): array => [ 'a', 'b' ], $allow )( [ 'site_ids' => [ 2 ] ] );
+closehub_test_assert( [ 'a', 'b' ] === $result['sites'][0]['result'] && 2 === $result['sites'][0]['site_id'], 'List results must be nested under result.' );
+$result = CloseHub_Network::execute( 'closehub/list-posts', static fn(): bool => true, $allow )( [ 'site_ids' => [ 2 ] ] );
+closehub_test_assert( true === $result['sites'][0]['result'], 'Scalar results must not crash the fan-out.' );
 
 // ── A user who is not a super admin only reaches the sites they belong to ──
 $GLOBALS['closehub_test_super']     = false;
@@ -100,7 +101,8 @@ $GLOBALS['closehub_test_super'] = true;
 
 // ── site_id is declared required for targeted abilities only ──
 closehub_test_assert( [ 'post_id', 'site_id' ] === CloseHub_Network::required( 'closehub/trash-post', [ 'post_id' ] ), 'Targeted schema must require site_id.' );
-closehub_test_assert( [ 'title' ] === CloseHub_Network::required( 'closehub/create-post', [ 'title' ] ) && [] === CloseHub_Network::required( 'closehub/update-plugins-and-core', [] ), 'Fan-out and server-wide schemas must not require site_id.' );
+closehub_test_assert( [ 'title', 'site_id' ] === CloseHub_Network::required( 'closehub/create-post', [ 'title' ] ), 'create-post must require site_id on multisite.' );
+closehub_test_assert( [] === CloseHub_Network::required( 'closehub/list-posts', [] ) && [] === CloseHub_Network::required( 'closehub/update-plugins-and-core', [] ), 'Fan-out and server-wide schemas must not require site_id.' );
 
 // ── Single site: input and output are untouched ──
 $GLOBALS['closehub_test_multisite'] = false;

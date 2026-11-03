@@ -68,13 +68,15 @@ This means `POST /posts` creates the post on every site of the network, `GET /wo
 
 Abilities are wrapped at registration by `CloseHub_Network::execute()` / `permission()` (see each class's `ability()` helper). `CloseHub_Network::SCOPES` maps every ability id to a scope; unlisted abilities default to `targeted`. When adding an ability, add it to that map.
 
-- `fanout`: runs on every site (or `site_ids`), returns `{ "sites": [ { "site_id", "site_url", ...data | "error" } ] }`.
+- `fanout`: read-only abilities only (never a write: a forgotten `site_ids` must not create one copy per site). Runs on every site (or `site_ids`), returns `{ "sites": [ { "site_id", "site_url", ...data | "error" } ] }`.
 - `targeted`: requires `site_id` on multisite; returns the data with `site_id`/`site_url` merged in, or the `WP_Error`. Use for anything keyed by a post ID, file, or per-site setting.
 - `once`: server-wide (plugin install/updates); runs once on the current site.
 
 Ability callbacks stay single-site (`switch_to_blog()` is done by the wrapper); never fan out inside a callback. Capabilities are checked per site after switching. On a single site the wrapper is a pass-through.
 
-Abilities registered by **other plugins** (`rank-math/*`, `wp-rocket/*`, `imagify/*`, `woocommerce/*`, `meta-box/*`…) are wrapped automatically on multisite by `CloseHub_Network::wrap_external_ability()`, hooked to `wp_register_ability_args`. They become `targeted`: `site_id` is added to the input schema, results are tagged with `site_id`/`site_url` (non-associative results go under `result`), and the output schema is widened to match. `closehub/`, `mcp-adapter/` and `core/` abilities are skipped; return `false` from the `closehub_network_wrap_ability` filter to opt another one out. Caveat: a plugin that caches its settings in memory per request (not via `get_option()`) can return the main site's values after `switch_to_blog()`; verify such abilities on a real network.
+Abilities registered by **other plugins** (`rank-math/*`, `wp-rocket/*`, `imagify/*`, `woocommerce/*`, `meta-box/*`…) are wrapped automatically on multisite by `CloseHub_Network::wrap_external_ability()`, hooked to `wp_register_ability_args`. They become `targeted`: `site_id` is added to the input schema, results are tagged with `site_id`/`site_url` (non-associative results go under `result`), and the output schema is widened to match. `closehub/`, `mcp-adapter/` and `core/` abilities are skipped; return `false` from the `closehub_network_wrap_ability` filter to opt another one out. A wrapped ability refuses to run (`closehub_plugin_inactive`) on a site where the plugin that defines its callback is neither active on that site nor network-active. Caveat: a plugin that caches its settings in memory per request (not via `get_option()`) can return the main site's values after `switch_to_blog()`; verify such abilities on a real network.
+
+WPML is one of those plugins: it loads its settings and active languages once per request and does not reload them on `switch_to_blog()`. `CloseHub_WPML` therefore reads the switched site's own `icl_languages` table and `icl_sitepress_settings` option, refuses `add-language`/`set-default-language` (`closehub_wpml_other_site`) while WPML's in-memory state belongs to another site, and makes `duplicate-post` use its plain copy instead of WPML's duplication in that case.
 
 ## Key classes
 

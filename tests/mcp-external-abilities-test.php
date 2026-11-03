@@ -83,6 +83,19 @@ $GLOBALS['closehub_test_wrap'] = true;
 $scalar = [ 'input_schema' => [ 'type' => 'string' ] ] + $args;
 closehub_test_assert( $scalar === CloseHub_Network::wrap_external_ability( $scalar, 'x/y' ), 'Non-object input cannot carry site_id and must be left alone.' );
 
+// ── A plugin that is not active on the target site is never run there ──
+// This file stands in for the plugin: callbacks defined here belong to "mcp-external-abilities-test.php".
+define( 'WP_PLUGIN_DIR', __DIR__ );
+$GLOBALS['closehub_test_active'] = [ 1 => [ 'mcp-external-abilities-test.php' ], 9 => [] ];
+function get_option( string $name, mixed $default = false ): mixed { return 'active_plugins' === $name ? $GLOBALS['closehub_test_active'][ $GLOBALS['closehub_test_blog_id'] ] : $default; }
+function get_site_option( string $name, mixed $default = false ): mixed { return $default; }
+$seen    = [];
+$guarded = CloseHub_Network::wrap_external_ability( $args, 'rank-math/get-redirections' );
+$off     = ( $guarded['execute_callback'] )( [ 'site_id' => 9 ] );
+closehub_test_assert( is_wp_error( $off ) && 'closehub_plugin_inactive' === $off->get_error_code() && [] === $seen, 'Ability must not run on a site where its plugin is inactive.' );
+$on = ( $guarded['execute_callback'] )( [ 'site_id' => 1 ] );
+closehub_test_assert( 1 === $on['total'] && [ 1 ] === array_column( $seen, 0 ), 'Ability must run where its plugin is active.' );
+
 // ── Single site: untouched ──
 $GLOBALS['closehub_test_multisite'] = false;
 closehub_test_assert( $args === CloseHub_Network::wrap_external_ability( $args, 'rank-math/get-redirections' ), 'Single-site abilities must be untouched.' );

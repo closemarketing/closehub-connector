@@ -31,7 +31,7 @@ class CloseHub_Network {
 		'closehub/add-language'            => self::TARGETED,
 		'closehub/set-default-language'    => self::TARGETED,
 		'closehub/duplicate-post'          => self::TARGETED,
-		'closehub/create-post'             => self::FANOUT,
+		'closehub/create-post'             => self::TARGETED, // A write: never create one copy per site just because site_id was forgotten.
 		'closehub/get-order-summary'       => self::FANOUT,
 		'closehub/flush-permalinks'        => self::FANOUT,
 		'closehub/get-post'                => self::TARGETED,
@@ -123,11 +123,45 @@ class CloseHub_Network {
 
 		// Abilities without an input schema receive null from WordPress; keep that once site_id is stripped.
 		$restore_null = static fn( $input ) => ( $had_input || ! empty( $input ) ) ? $input : null;
+		// A plugin activated on one site only still registers its ability network-wide: never run it on a site where it is inactive.
+		$plugin      = self::callback_plugin( $execute );
+		$run_execute = static function ( $input = null ) use ( $execute, $restore_null, $plugin ) {
+			if ( null !== $plugin && ! self::plugin_active_here( $plugin ) ) {
+				return new WP_Error( 'closehub_plugin_inactive', sprintf( 'The plugin that provides this ability (%s) is not active on this site.', $plugin ), [ 'status' => 400 ] );
+			}
+			return $execute( $restore_null( $input ) );
+		};
 		$run_permission              = static fn( $input = null ) => $permission( $restore_null( $input ) );
-		$args['execute_callback']    = self::execute( $ability_id, static fn( $input = null ) => $execute( $restore_null( $input ) ), $run_permission );
+		$args['execute_callback']    = self::execute( $ability_id, $run_execute, $run_permission );
 		$args['permission_callback'] = self::permission( $ability_id, $run_permission );
 
 		return $args;
+	}
+
+	/** Folder (or file, for a single-file plugin) of the plugin that defines $callback; null for core, mu-plugins or unknown code. */
+	private static function callback_plugin( callable $callback ): ?string {
+		if ( ! defined( 'WP_PLUGIN_DIR' ) ) {
+			return null;
+		}
+		try {
+			$file = ( new ReflectionFunction( Closure::fromCallable( $callback ) ) )->getFileName();
+		} catch ( ReflectionException ) {
+			return null;
+		}
+		$file = str_replace( '\\', '/', (string) $file );
+		$root = rtrim( str_replace( '\\', '/', WP_PLUGIN_DIR ), '/' ) . '/';
+		return '' !== $file && str_starts_with( $file, $root ) ? explode( '/', substr( $file, strlen( $root ) ) )[0] : null;
+	}
+
+	/** Whether a plugin folder/file is active on the current (possibly switched-to) site or network-wide. */
+	private static function plugin_active_here( string $plugin ): bool {
+		$active = array_merge( (array) get_option( 'active_plugins', [] ), array_keys( (array) get_site_option( 'active_sitewide_plugins', [] ) ) );
+		foreach ( $active as $basename ) {
+			if ( $basename === $plugin || str_starts_with( (string) $basename, $plugin . '/' ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Output schema that also allows the `site_id` / `site_url` that a targeted result is tagged with. */
@@ -257,7 +291,7 @@ class CloseHub_Network {
 				if ( self::TARGETED === $scope ) {
 					return is_wp_error( $data ) ? $data : self::tag_result( $entry, $data );
 				}
-				$entries[] = is_wp_error( $data ) ? $entry + [ 'error' => $data->get_error_message() ] : $entry + $data;
+				$entries[] = is_wp_error( $data ) ? $entry + [ 'error' => $data->get_error_message() ] : self::tag_result( $entry, $data );
 			}
 
 			return [ 'sites' => $entries ];
@@ -311,21 +345,13 @@ class CloseHub_Network {
 			return [ $site_id ];
 		}
 
-		// A translation link points at a post ID, which means a different post on every site: never fan it out.
-		$one_site = ! empty( $input['translation_of'] );
 		if ( ! isset( $input['site_ids'] ) || [] === $input['site_ids'] ) {
-			if ( $one_site ) {
-				return new WP_Error( 'closehub_site_id_required', 'translation_of refers to a post of a single site: pass exactly one id in site_ids on a multisite network.', [ 'status' => 400 ] );
-			}
 			return $available;
 		}
 		$requested = array_values( array_unique( array_filter( array_map( 'absint', (array) $input['site_ids'] ) ) ) );
 		$unknown   = array_diff( $requested, $available );
 		if ( $unknown || ! $requested ) {
 			return new WP_Error( 'closehub_site_not_found', sprintf( 'Unknown site IDs: %s.', implode( ', ', $unknown ?: [ 0 ] ) ), [ 'status' => 404 ] );
-		}
-		if ( $one_site && 1 !== count( $requested ) ) {
-			return new WP_Error( 'closehub_site_id_required', 'translation_of refers to a post of a single site: pass exactly one id in site_ids on a multisite network.', [ 'status' => 400 ] );
 		}
 		return $requested;
 	}

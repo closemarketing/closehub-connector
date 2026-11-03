@@ -78,7 +78,7 @@ WooCommerce, Gravity Forms, and Easy License Manager endpoints return a clear er
 
 **Multisite networks:**
 
-MCP abilities work from the network too: connect once with the network API key and every ability knows which sites it can act on. Abilities that read or create content (`list-posts`, `create-post`, `get-order-summary`, `flush-permalinks`) run on every site and return one result per site; pass `site_ids` to limit them. Abilities tied to a specific post, file or setting (for example `get-post`, `update-post`, `trash-post`, `set-robots-txt`, `clear-cache`) require a `site_id` so an ID is never applied to the wrong site. Server-wide abilities (`install-wp-org-plugin`, `list-unused-plugins`, `update-plugins-and-core`) run once. Use `closehub/list-sites` to discover site IDs. Permissions are re-checked on every site.
+MCP abilities work from the network too: connect once with the network API key and every ability knows which sites it can act on. Abilities that read content or rebuild per-site caches (`list-posts`, `list-languages`, `get-order-summary`, `flush-permalinks`) run on every site and return one result per site; pass `site_ids` to limit them. Abilities tied to a specific post, file or setting (for example `create-post`, `get-post`, `update-post`, `trash-post`, `set-robots-txt`, `clear-cache`) require a `site_id` so an ID is never applied to the wrong site. Server-wide abilities (`install-wp-org-plugin`, `list-unused-plugins`, `update-plugins-and-core`) run once. Use `closehub/list-sites` to discover site IDs. Permissions are re-checked on every site.
 
 On a WordPress Multisite network, the same endpoints listed above are shared by every site in the network — there is no separate namespace or key to manage. Activate the plugin network-wide and go to **Network Admin → Settings → CloseHub** to find one API key shared by the whole network. Every request to those endpoints automatically returns a `sites` array with one entry per site in the network (`site_id`, `url`, and that site's data or an `error` message), instead of a single site's result — handy when a network is used to run the same company in multiple languages.
 
@@ -135,6 +135,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Added multisite support to MCP abilities: fan-out across the network or a single site via `site_id` / `site_ids`, per-site permission checks, and a new `closehub/list-sites` ability.
 * Added WPML language management abilities: `list-languages`, `add-language`, `set-default-language` and `duplicate-post` (linked or unlinked copies).
 * Fixed `closehub/update-post` applying the same post ID on every site of a network.
+* Changed: on a multisite network `closehub/create-post` now requires `site_id` instead of creating the post on every site when no site was given.
+* Abilities from other plugins are not run on a subsite where that plugin is inactive, and WPML language changes are refused on a subsite while WPML still has another site's settings loaded, so they can never overwrite that subsite's WPML configuration.
+* `duplicate-post` creates its copies as drafts from the start and as independent translations, so editing the original never overwrites them; copies keep no SKU/GTIN and are authored by the acting user.
 * Added the `closehub/link-translations` and `closehub/unlink-translation` MCP abilities to link existing posts as WPML translations. `list-posts` and `get-post` now return every translation (`language`, `post_id`, `translation_group`), `list-posts` honors `language` with WPML (including `all`), and `create-post` now rejects `post_id` instead of silently creating a duplicate.
 
 = 1.3.0 =

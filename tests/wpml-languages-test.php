@@ -31,6 +31,8 @@ class Fake_SitePress {
 		if ( ! empty( $GLOBALS['native_error'] ) ) { return new WP_Error( 'wpml_boom', 'WPML exploded.' ); }
 		$new = $GLOBALS['next_id']++;
 		$GLOBALS['rows'][ $new ] = [ $GLOBALS['rows'][ $id ][0], ! empty( $GLOBALS['native_wrong_language'] ) ? 'de' : $lang, $GLOBALS['rows'][ $id ][1] ];
+		$filter = $GLOBALS['filters']['wp_insert_post_data'] ?? static fn( array $d ): array => $d;
+		$GLOBALS['inserted_status'][ $new ] = $filter( [ 'post_type' => 'post', 'post_status' => 'publish' ] )['post_status'];
 		$GLOBALS['status'][ $new ] = 'publish';
 		return $new;
 	}
@@ -48,6 +50,7 @@ class Fake_WPDB {
 		return $out;
 	}
 	public function get_var( string $q ): int { return max( array_column( $GLOBALS['rows'], 0 ) ) + 1; }
+	public function get_col( string $q ): array { return $GLOBALS['stored_active']; }
 }
 $wpdb = new Fake_WPDB();
 
@@ -77,8 +80,8 @@ function get_post( int $id ): ?WP_Post { return isset( $GLOBALS['rows'][ $id ] )
 function sanitize_key( string $key ): string { return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $key ) ); }
 function clean_post_cache( int $id ): void {}
 function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
-function wp_insert_post( array $args, bool $wp_error = false ): int { $id = $GLOBALS['next_id']++; $GLOBALS['copied'][] = $id; return $id; }
-function get_post_meta( int $id ): array { return [ 'k' => [ 'v' ], '_icl_lang_duplicate_of' => [ '1' ] ]; }
+function wp_insert_post( array $args, bool $wp_error = false ): int { $id = $GLOBALS['next_id']++; $GLOBALS['copied'][] = $id; $GLOBALS['inserted'][ $id ] = $args; return $id; }
+function get_post_meta( int $id ): array { return [ 'k' => [ 'v' ], '_icl_lang_duplicate_of' => [ '1' ], '_sku' => [ 'SKU-1' ] ]; }
 function add_post_meta( int $id, string $k, mixed $v ): void { $GLOBALS['meta'][ $id ][ $k ] = $v; }
 function wp_slash( mixed $v ): mixed { return $v; }
 function maybe_unserialize( mixed $v ): mixed { return $v; }
@@ -89,6 +92,16 @@ function wp_update_post( array $args ): int { $GLOBALS['status'][ $args['ID'] ] 
 function get_object_taxonomies( string $type ): array { return [ 'category' ]; }
 function wp_get_object_terms( int $id, string $tax, array $args ): array { return [ 4, 5 ]; }
 function wp_set_object_terms( int $id, array $terms, string $tax ): void { $GLOBALS['terms'][ $id ][ $tax ] = $terms; }
+function add_filter( string $hook, callable $callback ): void { $GLOBALS['filters'][ $hook ] = $callback; }
+function remove_filter( string $hook, callable $callback ): void { unset( $GLOBALS['filters'][ $hook ] ); }
+function delete_post_meta( int $id, string $key ): void { $GLOBALS['deleted_meta'][ $id ][] = $key; }
+function get_current_user_id(): int { return 42; }
+// Multisite: the request started on another site whose WPML settings are still in memory after switch_to_blog().
+$GLOBALS['switched']      = false;
+$GLOBALS['stored_active'] = [];
+$GLOBALS['stored_default'] = '';
+function ms_is_switched(): bool { return $GLOBALS['switched']; }
+function get_option( string $name, mixed $default = false ): mixed { return 'icl_sitepress_settings' === $name ? [ 'default_language' => $GLOBALS['stored_default'] ] : $default; }
 
 require_once dirname( __DIR__ ) . '/includes/class-wpml.php';
 
@@ -123,6 +136,8 @@ $dup = CloseHub_WPML::duplicate( 100, 'fr' );
 check( ! is_wp_error( $dup ) && 'fr' === $dup['language'] && 1 === $dup['translation_group'] && true === $dup['linked'], 'Native duplicate must be linked in the target language.' );
 
 check( 'draft' === ( $GLOBALS['status'][ $dup['post_id'] ] ?? '' ), 'A native duplicate of a published post must be forced back to draft.' );
+check( 'draft' === ( $GLOBALS['inserted_status'][ $dup['post_id'] ] ?? '' ) && ! isset( $GLOBALS['filters']['wp_insert_post_data'] ), 'A native duplicate must be inserted as a draft, and the filter removed afterwards.' );
+check( in_array( '_icl_lang_duplicate_of', $GLOBALS['deleted_meta'][ $dup['post_id'] ] ?? [], true ), 'A native duplicate must become an independent translation.' );
 
 // WPML errors from the native duplication are returned, not cast to post ID 1
 $GLOBALS['native_error'] = true;
@@ -139,12 +154,33 @@ $GLOBALS['native_wrong_language'] = false;
 $copy = CloseHub_WPML::duplicate( 200, 'en', false );
 check( ! is_wp_error( $copy ) && 'en' === $copy['language'] && 2 !== $copy['translation_group'] && false === $copy['linked'], 'link=false must create an independent copy in its own group.' );
 check( isset( $GLOBALS['meta'][ $copy['post_id'] ]['k'] ) && ! isset( $GLOBALS['meta'][ $copy['post_id'] ]['_icl_lang_duplicate_of'] ), 'Copy keeps meta but not WPML internals.' );
+check( ! isset( $GLOBALS['meta'][ $copy['post_id'] ]['_sku'] ), 'Copy must not duplicate a unique SKU.' );
+check( 42 === $GLOBALS['inserted'][ $copy['post_id'] ]['post_author'], 'Copy must be authored by the acting user.' );
 
 // duplicate (fallback copy when WPML has no make_duplicate result, linked)
 $GLOBALS['native'] = false;
 $fallback = CloseHub_WPML::duplicate( 200, 'fr' );
 check( ! is_wp_error( $fallback ) && 2 === $fallback['translation_group'] && 'fr' === $fallback['language'], 'Fallback copy must be linked to the original.' );
 check( [ 104, 105 ] === ( $GLOBALS['terms'][ $fallback['post_id'] ]['category'] ?? [] ), 'Fallback copy must carry the (translated) taxonomy terms.' );
+
+// Multisite: switched to a site whose WPML settings differ from the ones WPML loaded for this request
+$GLOBALS['native']         = true;
+$GLOBALS['switched']       = true;
+$GLOBALS['stored_active']  = [ 'es', 'it' ];
+$GLOBALS['stored_default'] = 'it';
+$list = CloseHub_WPML::languages();
+check( 'it' === $list['default_language'] && [ 'es', 'it' ] === array_column( $list['languages'], 'code' ), 'A switched site must list its own stored languages, not the in-memory ones.' );
+check( 'it' === CloseHub_WPML::validate( 'it' ) && 'closehub_invalid_language' === code( CloseHub_WPML::validate( 'en' ) ), 'Languages must be validated against the switched site.' );
+check( 'closehub_wpml_other_site' === code( CloseHub_WPML::add_language( 'de' ) ) && ! in_array( 'de', $GLOBALS['active'], true ), 'Adding a language with another site\'s settings in memory must be refused.' );
+check( 'closehub_wpml_other_site' === code( CloseHub_WPML::set_default_language( 'es' ) ) && 'en' === $GLOBALS['default'], 'Changing the default with another site\'s settings in memory must be refused.' );
+$GLOBALS['copied'] = [];
+$stale_dup         = CloseHub_WPML::duplicate( 200, 'it' );
+check( ! is_wp_error( $stale_dup ) && 'it' === $stale_dup['language'] && in_array( $stale_dup['post_id'], $GLOBALS['copied'], true ), 'Duplicating on a switched site must use the plain copy, not WPML\'s duplication.' );
+// Once WPML's in-memory state matches the switched site (e.g. WPML reloaded it), writes are allowed again.
+$GLOBALS['stored_active']  = $GLOBALS['active'];
+$GLOBALS['stored_default'] = $GLOBALS['default'];
+check( true === CloseHub_WPML::add_language( 'de' )['added'], 'Writes must work when WPML\'s state belongs to the switched site.' );
+$GLOBALS['switched'] = false;
 
 // WPML inactive
 unset( $GLOBALS['sitepress'] );

@@ -80,6 +80,7 @@ function wp_safe_remote_get( string $url, array $args ): array {
 function wp_remote_retrieve_response_code( array $response ): int { return $response['response']['code']; }
 function wp_remote_retrieve_header( array $response, string $header ): string { return $response['headers'][ $header ] ?? ''; }
 function wp_remote_retrieve_body( array $response ): string { return $response['body']; }
+function getallheaders(): array { return $GLOBALS['closehub_test_request_headers'] ?? []; }
 
 class CloseHub_Test_WPDB {
 	public string $prefix = 'wp_';
@@ -205,6 +206,52 @@ $invalid_cimd_client = $valid_authorize->invoke( null, [
 closehub_test_assert( $invalid_cimd_client instanceof WP_Error, 'A hosted client metadata document must reject an unlisted redirect URI.' );
 closehub_test_assert( 1 === $GLOBALS['closehub_test_remote_calls'][ $claude_client_id ], 'Hosted client metadata must be cached between authorization requests.' );
 
+// Codex registers a stable loopback URI without a port, then listens on an
+// ephemeral port for each login. RFC 8252 permits only that port component to
+// differ; the scheme, host, path, and query must remain registered exactly.
+$codex_client_id = 'https://chatgpt.com/oauth/codex/test-client/client.json';
+$GLOBALS['closehub_test_client_metadata'][ $codex_client_id ] = [
+	'response' => [ 'code' => 200 ],
+	'headers' => [],
+	'body' => wp_json_encode( [
+		'client_id' => $codex_client_id,
+		'client_name' => 'Codex',
+		'redirect_uris' => [
+			'http://127.0.0.1/callback/test-client',
+			'http://localhost/callback/test-client',
+		],
+	] ),
+];
+$codex_authorize = static function ( string $redirect_uri ) use ( $valid_authorize, $codex_client_id, $challenge ) {
+	return $valid_authorize->invoke( null, [
+		'response_type' => 'code',
+		'client_id' => $codex_client_id,
+		'redirect_uri' => $redirect_uri,
+		'state' => 'state',
+		'challenge' => $challenge,
+		'method' => 'S256',
+	] );
+};
+closehub_test_assert( is_array( $codex_authorize( 'http://127.0.0.1:50514/callback/test-client' ) ), 'A native client must be allowed to add an ephemeral IPv4 loopback port.' );
+closehub_test_assert( is_array( $codex_authorize( 'http://localhost:50515/callback/test-client' ) ), 'A native client must be allowed to add an ephemeral localhost port.' );
+closehub_test_assert( $codex_authorize( 'http://127.0.0.1:50514/callback/other-client' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered path.' );
+closehub_test_assert( $codex_authorize( 'http://localhost:50514/callback/test-client?next=other' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered query.' );
+closehub_test_assert( $codex_authorize( 'http://127.0.0.1:50514/callback/test-client#fragment' ) instanceof WP_Error, 'A loopback port exception must not allow an unregistered fragment.' );
+
+$authorization_query_args = new ReflectionMethod( CloseHub_OAuth::class, 'authorization_query_args' );
+$authorization_query_args->setAccessible( true );
+$login_return_args = $authorization_query_args->invoke( null, [
+	'response_type' => 'code',
+	'client_id' => $codex_client_id,
+	'redirect_uri' => 'http://127.0.0.1:50514/callback/test-client',
+	'state' => 'state',
+	'challenge' => $challenge,
+	'method' => 'S256',
+] );
+closehub_test_assert( $challenge === $login_return_args['code_challenge'], 'The login return URL must preserve code_challenge under its public OAuth name.' );
+closehub_test_assert( 'S256' === $login_return_args['code_challenge_method'], 'The login return URL must preserve code_challenge_method under its public OAuth name.' );
+closehub_test_assert( ! isset( $login_return_args['challenge'], $login_return_args['method'] ), 'The login return URL must not expose internal PKCE parameter names.' );
+
 $long_client_id = 'https://example.test/' . str_repeat( 'a', 192 );
 $long_client = $valid_authorize->invoke( null, [
 	'response_type' => 'code',
@@ -300,6 +347,24 @@ closehub_test_assert( $invalid_shared_token instanceof WP_Error && 'invalid_toke
 unset( $_SERVER['HTTP_AUTHORIZATION'], $GLOBALS['closehub_test_current_user'] );
 $_GET = [];
 $_SERVER = [];
+
+// Reverse proxies and some PHP SAPIs expose Authorization outside the two
+// standard $_SERVER keys WordPress normally reads.
+$authorization_header = new ReflectionMethod( CloseHub_OAuth::class, 'authorization_header' );
+$authorization_header->setAccessible( true );
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer direct-token';
+closehub_test_assert( 'Bearer direct-token' === $authorization_header->invoke( null ), 'The direct Authorization server variable must take precedence.' );
+unset( $_SERVER['HTTP_AUTHORIZATION'] );
+$_SERVER['REDIRECT_HTTP_AUTHORIZATION'] = 'Bearer rewritten-token';
+closehub_test_assert( 'Bearer rewritten-token' === $authorization_header->invoke( null ), 'A rewritten Authorization server variable must be accepted.' );
+unset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] );
+$_SERVER['HTTP_X_FORWARDED_AUTHORIZATION'] = 'Bearer forwarded-token';
+closehub_test_assert( 'Bearer forwarded-token' === $authorization_header->invoke( null ), 'A reverse-proxy Authorization server variable must be accepted.' );
+unset( $_SERVER['HTTP_X_FORWARDED_AUTHORIZATION'] );
+$GLOBALS['closehub_test_request_headers'] = [ 'aUtHoRiZaTiOn' => 'Bearer sapi-token' ];
+closehub_test_assert( 'Bearer sapi-token' === $authorization_header->invoke( null ), 'A case-insensitive SAPI request header must be accepted.' );
+unset( $GLOBALS['closehub_test_request_headers'] );
+closehub_test_assert( '' === $authorization_header->invoke( null ), 'A request without an Authorization source must remain unauthenticated.' );
 
 // ── static .well-known discovery metadata ───────────────────────────────────
 

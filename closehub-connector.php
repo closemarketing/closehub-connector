@@ -48,8 +48,10 @@ function closehub_init(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-wpml.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-rest-api.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-network.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-site-abilities.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-language-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-package-installer.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-deploy-ticket.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-package-rest.php';
@@ -65,4 +67,6 @@ function closehub_init(): void {
 
 	CloseHub_Content_Abilities::register();
 	CloseHub_Site_Abilities::register();
+	CloseHub_Language_Abilities::register();
+	CloseHub_Network::register();
 }

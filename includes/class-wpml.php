@@ -165,8 +165,10 @@ class CloseHub_WPML {
 	/**
 	 * Attach an existing post to the translation group of $translation_of. Never creates or edits content.
 	 * With $force, an existing translation in that language is detached and a post that is itself the source of other translations may be moved.
+	 * With $dry_run, nothing is written: the plan is returned, including what force would be needed for.
+	 * Note: this writes icl_translations only. It does not create a WPML Translation Management status record.
 	 */
-	public static function link( int $post_id, int $translation_of, string $language, bool $force = false ): array|WP_Error {
+	public static function link( int $post_id, int $translation_of, string $language, bool $force = false, bool $dry_run = false ): array|WP_Error {
 		$language = $language ? self::validate( $language, $translation_of ) : new WP_Error( 'closehub_invalid_language', 'language is required to link translations.', [ 'status' => 400 ] );
 		if ( is_wp_error( $language ) ) {
 			return $language;
@@ -206,25 +208,43 @@ class CloseHub_WPML {
 		$affected     = array_merge( [ $post_id, $translation_of ], array_column( $new_members, 'post_id' ) );
 
 		if ( $old_trid === $new_trid && $details && (string) ( $details->source_language_code ?? '' ) === (string) $source_details->language_code ) {
-			return self::result( $post_id, $old_trid, $affected ) + [ 'changed' => false ];
+			return self::result( $post_id, $old_trid, $affected ) + [ 'changed' => false ] + ( $dry_run ? [ 'dry_run' => true, 'already_linked' => true, 'requires_force' => false ] : [] );
 		}
 
-		$detached = null;
+		$detached   = null;
+		$dependents = [];
 		foreach ( $new_members as $member ) {
 			if ( $member['language'] === $language && $member['post_id'] !== $post_id ) {
-				if ( ! $force ) {
+				if ( ! $force && ! $dry_run ) {
 					return new WP_Error( 'closehub_translation_conflict', sprintf( 'Post %d is already the "%s" translation of this group. Pass force=true to detach it, or unlink it first.', $member['post_id'], $language ), [ 'status' => 409, 'conflicting_post_id' => $member['post_id'] ] );
 				}
 				$detached = $member['post_id'];
 			}
 		}
+		$old_members = [];
 		if ( $old_trid && $old_trid !== $new_trid ) {
 			$old_members = self::members( $old_trid, $element_type );
 			$affected    = array_merge( $affected, array_column( $old_members, 'post_id' ) );
-			$dependents  = array_filter( $old_members, static fn( array $m ): bool => $m['post_id'] !== $post_id && $m['source_language'] === $language );
-			if ( $dependents && ! $force ) {
+			$dependents  = array_values( array_filter( $old_members, static fn( array $m ): bool => $m['post_id'] !== $post_id && $m['source_language'] === $language ) );
+			if ( $dependents && ! $force && ! $dry_run ) {
 				return new WP_Error( 'closehub_translation_has_dependents', sprintf( 'Post %d is the source of other translations (%s). Pass force=true to move it anyway, leaving them in the old group.', $post_id, implode( ', ', array_column( $dependents, 'post_id' ) ) ), [ 'status' => 409, 'dependent_post_ids' => array_values( array_column( $dependents, 'post_id' ) ) ] );
 			}
+		}
+
+		if ( $dry_run ) {
+			return [
+				'dry_run'                    => true,
+				'post_id'                    => $post_id,
+				'language'                   => $language,
+				'current_translation_group'  => $old_trid,
+				'target_translation_group'   => $new_trid,
+				'already_linked'             => $old_trid === $new_trid,
+				'would_detach_post_id'       => $detached,
+				'would_leave_in_old_group'   => array_column( $dependents, 'post_id' ),
+				'old_group_remaining_post_ids' => array_values( array_column( array_filter( $old_members, static fn( array $m ): bool => $m['post_id'] !== $post_id ), 'post_id' ) ),
+				'requires_force'             => (bool) ( $detached || $dependents ),
+				'target_group_members'       => $new_members,
+			];
 		}
 
 		if ( $detached ) {
@@ -238,6 +258,8 @@ class CloseHub_WPML {
 		self::refresh( $affected );
 
 		$result = self::result( $post_id, $old_trid, $affected );
+		// Dependents left behind keep a source language that no longer exists in their group; report them rather than hide it.
+		$result['left_in_old_group'] = array_column( $dependents, 'post_id' );
 		if ( (int) ( $result['translation_group'] ?? 0 ) !== $new_trid ) {
 			return new WP_Error( 'closehub_translation_link_failed', 'WPML did not apply the translation link.', [ 'status' => 500 ] );
 		}

@@ -4,7 +4,7 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 Version: 1.3.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -136,7 +136,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= Unreleased =
+= 1.3.1 =
+* Added MCP abilities to install or replace a plugin or theme from a zip (`install-plugin-zip`, `install-theme-zip`), with single-use deploy tickets for large uploads (`create-deploy-ticket`), `get-installed-version` and `rollback-package` to restore the backup taken before a replacement.
+* Added `parent_id` to `create-post` and `update-post` for hierarchical post types such as pages; `list-posts`/`get-post` return it.
+* Fixed `PUT /posts/{id}` clearing SEO fields that were not sent: only the SEO fields present in the request are updated.
 * Added `missing_translation` to `closehub/list-posts`: with WPML, only return posts whose translation group has no post in that language.
 * Added `dry_run` to `closehub/link-translations` to preview the current and target translation groups, the post that would be detached and whether `force` is needed, without writing. The ability is now annotated as destructive and reports `left_in_old_group` when a forced move leaves dependent translations behind.
 * Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.

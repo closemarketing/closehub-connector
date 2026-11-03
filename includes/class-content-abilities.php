@@ -48,6 +48,7 @@ class CloseHub_Content_Abilities {
 	public static function register_abilities(): void {
 		self::ability( 'closehub/list-posts', 'List posts', 'List or search posts, or another post type such as "page" or "product", with status, language, and pagination filters.', [ self::class, 'list_posts' ], [ self::class, 'can_edit_posts' ], true, true, [
 			'status' => [ 'type' => 'string' ], 'search' => [ 'type' => 'string' ], 'language' => [ 'type' => 'string' ], 'page' => [ 'type' => 'integer', 'default' => 1 ], 'per_page' => [ 'type' => 'integer', 'default' => 20 ], 'post_type' => [ 'type' => 'string', 'default' => 'post' ],
+			'missing_translation' => [ 'type' => 'string', 'description' => 'WPML language code. Only return posts whose translation group has no post in that language (requires WPML). Each post also returns its translations.' ],
 		] );
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
 		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post. With WPML, pass language to create it in that language; add translation_of (the original post ID) to also link it as a translation of that post, or omit it to keep it unlinked. To copy an existing post into another language use duplicate-post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
@@ -69,13 +70,14 @@ class CloseHub_Content_Abilities {
 			'block'               => [ 'type' => 'string' ],
 			], [ 'post_id', 'block_path', 'expected_block_name', 'expected_content_hash', 'block' ], true );
 		self::ability( 'closehub/trash-post', 'Trash post', 'Send an existing post, page, product, or other supported content item to the WordPress trash without permanently deleting it.', [ self::class, 'trash_post' ], [ self::class, 'can_delete_post' ], false, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ], true );
-		self::ability( 'closehub/link-translations', 'Link translations', 'Link two EXISTING posts as WPML translations of each other without creating or editing content. post_id is attached to the translation group of translation_of (the original), in the given language. Rejects a language mismatch, different post types, or an existing translation in that language unless force is true. Purges the page cache of the affected posts.', [ self::class, 'link_translations' ], [ self::class, 'can_link_translations' ], false, true, [
+		self::ability( 'closehub/link-translations', 'Link translations', 'Link two EXISTING posts as WPML translations of each other without creating or editing content. post_id is attached to the translation group of translation_of (the original), in the given language. Rejects a language mismatch, different post types, or an existing translation in that language unless force is true. force is destructive: it detaches the existing translation and can move a post that is the source of others. Use dry_run=true first to see the current group, target group and what would be detached, without changing anything. Writes WPML icl_translations only; it does not create a WPML Translation Management status record. Purges the page cache of the affected posts.', [ self::class, 'link_translations' ], [ self::class, 'can_link_translations' ], false, true, [
 			'post_id'        => [ 'type' => 'integer', 'description' => 'Existing post to attach as the translation.' ],
 			'translation_of' => [ 'type' => 'integer', 'description' => 'Existing original (source language) post.' ],
 			'language'       => [ 'type' => 'string', 'description' => 'WPML language code post_id is in.' ],
-			'force'          => [ 'type' => 'boolean', 'default' => false, 'description' => 'Detach an existing translation in that language, and allow moving a post that is the source of other translations.' ],
+			'force'          => [ 'type' => 'boolean', 'default' => false, 'description' => 'DESTRUCTIVE. Detach an existing translation in that language, and allow moving a post that is the source of other translations.' ],
+			'dry_run'        => [ 'type' => 'boolean', 'default' => false, 'description' => 'Return what would change (groups, detached post, requires_force) without writing.' ],
 			'clear_cache'    => [ 'type' => 'boolean', 'default' => true ],
-		], [ 'post_id', 'translation_of', 'language' ] );
+		], [ 'post_id', 'translation_of', 'language' ], true );
 		self::ability( 'closehub/unlink-translation', 'Unlink translation', 'Split a WPML translation off its translation group into a group of its own without touching content. The original post of a group cannot be unlinked while it has translations.', [ self::class, 'unlink_translation' ], [ self::class, 'can_edit_post' ], false, true, [
 			'post_id'     => [ 'type' => 'integer' ],
 			'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
@@ -139,12 +141,25 @@ class CloseHub_Content_Abilities {
 		$page = max( 1, absint( $input['page'] ?? 1 ) );
 		$args = [ 'post_type' => $post_type, 'post_status' => $input['status'] ?? 'publish', 'perm' => 'readable', 's' => sanitize_text_field( $input['search'] ?? '' ), 'paged' => $page, 'posts_per_page' => min( 100, max( 1, absint( $input['per_page'] ?? 20 ) ) ) ];
 		if ( ! empty( $input['language'] ) ) { $args['lang'] = sanitize_key( $input['language'] ); }
+		// Validate before switching WPML's language, so an early return never leaves it switched.
+		$missing = sanitize_key( $input['missing_translation'] ?? '' );
+		if ( $missing && ! has_filter( 'wpml_active_languages' ) ) { return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to filter by missing_translation.', [ 'status' => 400 ] ); }
 		$previous_language = null;
 		if ( ! empty( $input['language'] ) && has_filter( 'wpml_current_language' ) ) {
 			$previous_language = apply_filters( 'wpml_current_language', null );
 			do_action( 'wpml_switch_language', sanitize_key( $input['language'] ) ); // WPML filters queries by its current language, not by a "lang" argument. "all" is valid.
 		}
+		if ( $missing ) {
+			$missing_filter = static function ( string $where ) use ( $missing ): string {
+				global $wpdb;
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				return $where . $wpdb->prepare( " AND NOT EXISTS ( SELECT 1 FROM {$wpdb->prefix}icl_translations mt1 JOIN {$wpdb->prefix}icl_translations mt2 ON mt1.trid = mt2.trid WHERE mt1.element_id = {$wpdb->posts}.ID AND mt1.element_type = CONCAT( 'post_', {$wpdb->posts}.post_type ) AND mt2.language_code = %s AND mt2.element_id IS NOT NULL )", $missing );
+			};
+			add_filter( 'posts_where', $missing_filter );
+			$args['suppress_filters'] = false;
+		}
 		$query = new WP_Query( $args );
+		if ( isset( $missing_filter ) ) { remove_filter( 'posts_where', $missing_filter ); }
 		if ( null !== $previous_language ) { do_action( 'wpml_switch_language', $previous_language ); }
 		CloseHub_WPML::prefetch( $query->posts );
 		return [ 'posts' => array_map( [ self::class, 'post_data' ], $query->posts ), 'page' => $page, 'total' => (int) $query->found_posts, 'total_pages' => (int) $query->max_num_pages ];
@@ -185,7 +200,8 @@ class CloseHub_Content_Abilities {
 				return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
 			}
 		}
-		$result = CloseHub_WPML::link( $post_id, $translation_of, sanitize_key( $input['language'] ?? '' ), ! empty( $input['force'] ) );
+		$result = CloseHub_WPML::link( $post_id, $translation_of, sanitize_key( $input['language'] ?? '' ), ! empty( $input['force'] ), ! empty( $input['dry_run'] ) );
+		if ( ! is_wp_error( $result ) && ! empty( $result['dry_run'] ) ) { return $result; }
 		return is_wp_error( $result ) ? $result : self::finish_translation_change( $result, $input );
 	}
 

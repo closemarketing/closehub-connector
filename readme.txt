@@ -137,6 +137,8 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = Unreleased =
+* Added `missing_translation` to `closehub/list-posts`: with WPML, only return posts whose translation group has no post in that language.
+* Added `dry_run` to `closehub/link-translations` to preview the current and target translation groups, the post that would be detached and whether `force` is needed, without writing. The ability is now annotated as destructive and reports `left_in_old_group` when a forced move leaves dependent translations behind.
 * Fixed Codex and other native MCP clients being rejected when their OAuth callback used an ephemeral loopback port, as required by RFC 8252.
 * Fixed OAuth PKCE parameters being lost when an authorization request passed through the WordPress login screen.
 * Fixed Bearer authentication behind PHP-FPM and reverse proxies that expose the Authorization header outside the standard WordPress server variables.

@@ -94,9 +94,17 @@ check( [ 8001 ] === CloseHub_WPML::forced_link_collateral( 8000, 9000, 'es' ), '
 check( [] === CloseHub_WPML::forced_link_collateral( 123456, 4732, 'en' ), 'Unknown posts have no collateral.' );
 
 // Real case: 5789 (en, own trid) becomes the en translation of 4732, replacing 6000 with force.
+// Dry run: reports the plan, writes nothing.
+$before = $GLOBALS['rows'];
+$plan   = CloseHub_WPML::link( 5789, 4732, 'en', false, true );
+check( ! is_wp_error( $plan ) && true === $plan['dry_run'] && true === $plan['requires_force'] && 6000 === $plan['would_detach_post_id'], 'Dry run must report the detach and requires_force.' );
+check( $before === $GLOBALS['rows'], 'Dry run must not write.' );
+
 $result = CloseHub_WPML::link( 5789, 4732, 'en', true );
 check( ! is_wp_error( $result ), 'Forced link should succeed.' );
 check( [ 5561, 'en', 'es' ] === $GLOBALS['rows'][5789], 'Post must join the original trid with the original as source language.' );
+$noop = CloseHub_WPML::link( 5789, 4732, 'en', false, true );
+check( true === $noop['dry_run'] && true === $noop['already_linked'] && false === $noop['requires_force'] && false === $noop['changed'], 'Dry run of an existing link must report it as already linked.' );
 check( 5561 === $result['translation_group'] && 5901 === $result['previous_translation_group'] && 6000 === $result['detached_post_id'] && true === $result['changed'], 'Link result must report groups and detached post.' );
 check( null === $GLOBALS['rows'][6000][2] && 5561 !== $GLOBALS['rows'][6000][0], 'Conflicting translation must be detached into its own group.' );
 check( [ 4732, 5789 ] === array_column( $result['translations'], 'post_id' ) || [ 5789, 4732 ] === array_column( $result['translations'], 'post_id' ), 'Group must contain exactly both posts.' );

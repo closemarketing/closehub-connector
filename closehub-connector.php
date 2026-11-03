@@ -50,8 +50,12 @@ function closehub_init(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-site-abilities.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-package-installer.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-deploy-ticket.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-package-rest.php';
 
 	( new CloseHub_REST_API() )->register();
+	( new CloseHub_Package_REST() )->register();
 	( new CloseHub_Admin() )->register();
 	CloseHub_OAuth::init();
 

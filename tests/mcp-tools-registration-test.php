@@ -16,6 +16,7 @@ require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 require_once dirname( __DIR__ ) . '/includes/class-site-abilities.php';
 require_once dirname( __DIR__ ) . '/includes/class-language-abilities.php';
+require_once dirname( __DIR__ ) . '/includes/class-package-installer.php';
 
 CloseHub_Content_Abilities::register();
 CloseHub_Site_Abilities::register();
@@ -50,6 +51,11 @@ $expected = [
 	'closehub/set-site-settings',
 	'closehub/reassign-posts-author',
 	'closehub/install-wp-org-plugin',
+	'closehub/install-plugin-zip',
+	'closehub/install-theme-zip',
+	'closehub/create-deploy-ticket',
+	'closehub/get-installed-version',
+	'closehub/rollback-package',
 	'closehub/list-unused-plugins',
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',

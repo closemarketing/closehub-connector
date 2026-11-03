@@ -18,6 +18,11 @@ class CloseHub_Site_Abilities {
 		'closehub/set-site-settings',
 		'closehub/reassign-posts-author',
 		'closehub/install-wp-org-plugin',
+		'closehub/install-plugin-zip',
+		'closehub/install-theme-zip',
+		'closehub/create-deploy-ticket',
+		'closehub/get-installed-version',
+		'closehub/rollback-package',
 		'closehub/list-unused-plugins',
 		'closehub/update-plugins-and-core',
 		'closehub/create-site-user',
@@ -77,6 +82,28 @@ class CloseHub_Site_Abilities {
 			'slug' => [ 'type' => 'string' ],
 		], [ 'slug' ] );
 
+		$zip_properties = [
+			'filename'    => [ 'type' => 'string', 'description' => 'Name of the zip file, e.g. my-plugin.zip.' ],
+			'data_base64' => [ 'type' => 'string', 'description' => 'The zip file contents, base64-encoded. Only for small zips: for real packages use create-deploy-ticket and upload the zip from disk to the URL it returns.' ],
+			'slug'        => [ 'type' => 'string', 'description' => 'Expected folder name. The call fails if the zip contains a different folder, so it can never replace another plugin or theme.' ],
+			'overwrite'   => [ 'type' => 'boolean', 'default' => true, 'description' => 'Replace the installed copy when one with the same folder exists, like "Replace current with uploaded" in the admin. The installed copy is backed up first. When false, an existing copy makes the call fail.' ],
+			'activate'    => [ 'type' => 'boolean', 'default' => false, 'description' => 'Activate it after installing. A replaced item that was already active stays active either way.' ],
+		];
+		$package_properties = [
+			'type' => [ 'type' => 'string', 'enum' => CloseHub_Package_Installer::TYPES ],
+			'slug' => [ 'type' => 'string', 'description' => 'Plugin folder or theme stylesheet folder name.' ],
+		];
+
+		self::ability( 'closehub/install-plugin-zip', 'Install or replace a plugin from a zip', 'Upload a plugin zip and install it exactly like Plugins > Add New > Upload Plugin, replacing the installed copy when overwrite is true (the default) after backing it up. Clears WP Rocket and OPcache. Does not activate unless activate is true.', [ self::class, 'install_plugin_zip' ], [ self::class, 'can_install_plugins' ], false, true, $zip_properties, [ 'filename', 'data_base64' ], true );
+
+		self::ability( 'closehub/install-theme-zip', 'Install or replace a theme from a zip', 'Upload a theme zip and install it exactly like Appearance > Themes > Add New > Upload Theme, replacing the installed copy when overwrite is true (the default) after backing it up. Clears WP Rocket and OPcache. Does not activate unless activate is true.', [ self::class, 'install_theme_zip' ], [ self::class, 'can_install_themes' ], false, true, $zip_properties, [ 'filename', 'data_base64' ], true );
+
+		self::ability( 'closehub/create-deploy-ticket', 'Create a deploy ticket for a zip upload', 'Create a single-use ticket to upload one plugin or theme zip from disk (for example with bin/closehub-deploy or curl) to the returned upload_url, sending it in the X-CloseHub-Deploy-Ticket header. The ticket is bound to the current user, this type and this slug, expires in 15 minutes and is burned on first use. The upload installs or replaces the package like install-plugin-zip / install-theme-zip, with a backup first.', [ self::class, 'create_deploy_ticket' ], [ self::class, 'can_install_package' ], false, false, $package_properties, [ 'type', 'slug' ] );
+
+		self::ability( 'closehub/get-installed-version', 'Get installed plugin or theme version', 'Get the installed version of one plugin or theme, whether it is active, and the backups available for rollback-package. Use it to verify a deploy.', [ self::class, 'get_installed_version' ], [ self::class, 'can_view_package' ], true, true, $package_properties, [ 'type', 'slug' ] );
+
+		self::ability( 'closehub/rollback-package', 'Roll back a plugin or theme', 'Reinstall a backup taken before a zip install replaced a plugin or theme. Uses the most recent backup unless backup names one returned by get-installed-version. The current copy is backed up first.', [ self::class, 'rollback_package' ], [ self::class, 'can_replace_package' ], false, false, $package_properties + [ 'backup' => [ 'type' => 'string' ] ], [ 'type', 'slug' ], true );
+
 		self::ability( 'closehub/list-unused-plugins', 'List unused plugins', 'List installed plugins that are not currently active, as candidates for removal.', [ self::class, 'list_unused_plugins' ], [ self::class, 'can_view_plugins' ], true, true, [] );
 
 		self::ability( 'closehub/update-plugins-and-core', 'Update plugins and core', 'Update every plugin with an available update and WordPress core to the latest available version.', [ self::class, 'update_plugins_and_core' ], [ self::class, 'can_update_site' ], false, false, [], [], true );
@@ -105,6 +132,14 @@ class CloseHub_Site_Abilities {
 	public static function can_edit_post_meta( $input ): bool { return current_user_can( 'edit_post', absint( $input['post_id'] ?? 0 ) ); }
 	public static function can_reassign_posts(): bool { return current_user_can( 'edit_others_posts' ); }
 	public static function can_install_plugins(): bool { return current_user_can( 'install_plugins' ); }
+	public static function can_install_themes(): bool { return current_user_can( 'install_themes' ); }
+	public static function can_install_package( $input ): bool { return current_user_can( 'theme' === ( $input['type'] ?? '' ) ? 'install_themes' : 'install_plugins' ); }
+	public static function can_view_package( $input ): bool { return current_user_can( 'theme' === ( $input['type'] ?? '' ) ? 'switch_themes' : 'activate_plugins' ); }
+	public static function can_replace_package( $input ): bool {
+		return 'theme' === ( $input['type'] ?? '' )
+			? current_user_can( 'install_themes' ) && current_user_can( 'update_themes' )
+			: current_user_can( 'install_plugins' ) && current_user_can( 'update_plugins' );
+	}
 	public static function can_view_plugins(): bool { return current_user_can( 'activate_plugins' ); }
 	public static function can_update_site(): bool { return current_user_can( 'update_plugins' ) && current_user_can( 'update_core' ); }
 	/** WP Rocket registers rocket_purge_cache so non-admin roles can be allowed to purge; respect it alongside manage_options. */
@@ -366,6 +401,100 @@ class CloseHub_Site_Abilities {
 		}
 
 		return [ 'slug' => $slug, 'plugin_file' => $upgrader->plugin_info(), 'installed' => true, 'activated' => false ];
+	}
+
+	// ── Zip upload (plugins and themes) ─────────────────────────────────────────
+
+	public static function install_plugin_zip( $input ): array|WP_Error {
+		return self::install_zip_payload( 'plugin', is_array( $input ) ? $input : [] );
+	}
+
+	public static function install_theme_zip( $input ): array|WP_Error {
+		return self::install_zip_payload( 'theme', is_array( $input ) ? $input : [] );
+	}
+
+	public static function create_deploy_ticket( $input ): array|WP_Error {
+		$type = (string) ( $input['type'] ?? '' );
+		$slug = (string) ( $input['slug'] ?? '' );
+		if ( ! in_array( $type, CloseHub_Package_Installer::TYPES, true ) || ! CloseHub_Package_Installer::valid_slug( $slug ) ) {
+			return new WP_Error( 'closehub_package_invalid_slug', 'A valid type (plugin or theme) and slug are required.', [ 'status' => 400 ] );
+		}
+		if ( ! wp_is_file_mod_allowed( 'closehub_zip_install' ) ) {
+			return new WP_Error( 'closehub_file_mods_disabled', 'File modifications are disabled on this site (DISALLOW_FILE_MODS).', [ 'status' => 403 ] );
+		}
+		return CloseHub_Deploy_Ticket::issue( get_current_user_id(), $type, $slug ) + [
+			'type'       => $type,
+			'slug'       => $slug,
+			'upload_url' => add_query_arg( [ 'type' => $type, 'slug' => $slug ], rest_url( CloseHub_REST_API::NAMESPACE . '/packages/install' ) ),
+			'header'     => CloseHub_Deploy_Ticket::HEADER,
+		];
+	}
+
+	public static function get_installed_version( $input ): array|WP_Error {
+		$type = (string) ( $input['type'] ?? '' );
+		$slug = (string) ( $input['slug'] ?? '' );
+		if ( ! in_array( $type, CloseHub_Package_Installer::TYPES, true ) || ! CloseHub_Package_Installer::valid_slug( $slug ) ) {
+			return new WP_Error( 'closehub_package_invalid_slug', 'A valid type (plugin or theme) and slug are required.', [ 'status' => 400 ] );
+		}
+		$installed = CloseHub_Package_Installer::installed( $type, $slug );
+		return [ 'type' => $type, 'slug' => $slug, 'installed' => null !== $installed ] + ( $installed ?? [] ) + [ 'backups' => CloseHub_Package_Installer::backups( $type, $slug ) ];
+	}
+
+	public static function rollback_package( $input ): array|WP_Error {
+		return CloseHub_Package_Installer::rollback( (string) ( $input['type'] ?? '' ), (string) ( $input['slug'] ?? '' ), (string) ( $input['backup'] ?? '' ) );
+	}
+
+	private static function install_zip_payload( string $type, array $input ): array|WP_Error {
+		$zip = self::write_zip_to_temp_file( $input );
+		if ( is_wp_error( $zip ) ) {
+			return $zip;
+		}
+		$result = CloseHub_Package_Installer::install( $type, $zip, [
+			'slug'      => (string) ( $input['slug'] ?? '' ),
+			'overwrite' => ! array_key_exists( 'overwrite', $input ) || ! empty( $input['overwrite'] ),
+			'activate'  => ! empty( $input['activate'] ),
+		] );
+		wp_delete_file( $zip );
+		return $result;
+	}
+
+	/**
+	 * Validate the zip payload and write it to a temp file the upgrader can read.
+	 * The caller must delete the returned file.
+	 */
+	private static function write_zip_to_temp_file( array $input ): string|WP_Error {
+		if ( ! wp_is_file_mod_allowed( 'closehub_zip_install' ) ) {
+			return new WP_Error( 'closehub_file_mods_disabled', 'File modifications are disabled on this site (DISALLOW_FILE_MODS).', [ 'status' => 403 ] );
+		}
+		if ( ! isset( $input['filename'] ) || ! is_string( $input['filename'] ) || '' === $input['filename'] ) {
+			return new WP_Error( 'closehub_missing_filename', 'filename is required.', [ 'status' => 400 ] );
+		}
+		if ( ! isset( $input['data_base64'] ) || ! is_string( $input['data_base64'] ) || '' === $input['data_base64'] ) {
+			return new WP_Error( 'closehub_missing_data_base64', 'data_base64 is required.', [ 'status' => 400 ] );
+		}
+		$filename = sanitize_file_name( $input['filename'] );
+		if ( '' === $filename || 'zip' !== strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) ) ) {
+			return new WP_Error( 'closehub_invalid_filename', 'filename must be a .zip file name.', [ 'status' => 400 ] );
+		}
+		$contents = base64_decode( $input['data_base64'], true );
+		if ( false === $contents || '' === $contents ) {
+			return new WP_Error( 'closehub_invalid_data_base64', 'data_base64 must be valid, non-empty base64 data.', [ 'status' => 400 ] );
+		}
+		$max_size = wp_max_upload_size();
+		if ( $max_size <= 0 || strlen( $contents ) > $max_size ) {
+			return new WP_Error( 'closehub_zip_too_large', 'The decoded zip exceeds this site\'s maximum upload size.', [ 'status' => 413 ] );
+		}
+		if ( ! str_starts_with( $contents, "PK\x03\x04" ) ) {
+			return new WP_Error( 'closehub_invalid_zip', 'The uploaded data is not a zip archive.', [ 'status' => 400 ] );
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$path = wp_tempnam( $filename );
+		if ( ! $path || false === file_put_contents( $path, $contents ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			return new WP_Error( 'closehub_zip_write_failed', 'Could not write the zip to a temporary file.', [ 'status' => 500 ] );
+		}
+
+		return $path;
 	}
 
 	// ── Unused plugins ──────────────────────────────────────────────────────────

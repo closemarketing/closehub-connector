@@ -51,6 +51,11 @@ class CloseHub_Network {
 		'closehub/create-site-user'        => self::TARGETED,
 		'closehub/clear-cache'             => self::TARGETED,
 		'closehub/install-wp-org-plugin'   => self::ONCE,
+		'closehub/install-plugin-zip'      => self::ONCE,
+		'closehub/install-theme-zip'       => self::ONCE,
+		'closehub/create-deploy-ticket'    => self::ONCE,
+		'closehub/get-installed-version'   => self::ONCE,
+		'closehub/rollback-package'        => self::ONCE,
 		'closehub/list-unused-plugins'     => self::ONCE,
 		'closehub/update-plugins-and-core' => self::ONCE,
 	];

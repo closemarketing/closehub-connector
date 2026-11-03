@@ -44,6 +44,8 @@ function wp_get_attachment_url( int $attachment_id ): string { return 'https://e
 function wp_register_ability( string $id, array $args ): bool { $GLOBALS['closehub_test_abilities'][ $id ] = $args; return true; }
 function absint( $value ): int { return abs( (int) $value ); }
 
+function is_multisite(): bool { return false; }
+require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-content-abilities.php';
 
 $missing = CloseHub_Content_Abilities::upload_media( [] );

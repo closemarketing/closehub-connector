@@ -237,6 +237,9 @@ class CloseHub_Admin {
 					<th scope="row"><?php esc_html_e( 'MCP server URL', 'closehub-connector' ); ?></th>
 					<td>
 						<?php $this->render_copy( $mcp_url ); ?>
+						<?php if ( $network ) : ?>
+							<p class="description"><?php esc_html_e( 'One connection covers the whole network. Abilities run on every site, or on the site you choose with site_id — ask Claude to run “List sites” to see the IDs.', 'closehub-connector' ); ?></p>
+						<?php endif; ?>
 						<?php if ( ! class_exists( '\\WP\\MCP\\Plugin' ) ) : ?>
 							<p class="description"><?php esc_html_e( 'The MCP Adapter is not available. Reinstall the plugin package to include its Composer dependencies.', 'closehub-connector' ); ?></p>
 						<?php endif; ?>

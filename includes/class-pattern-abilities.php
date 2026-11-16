@@ -14,6 +14,9 @@ class CloseHub_Pattern_Abilities {
 		'closehub/get-theme-pattern',
 	];
 
+	/** Blog whose request populated WP_Block_Patterns_Registry; 0 until the abilities are registered. */
+	private static int $registry_blog_id = 0;
+
 	public static function register(): void {
 		if ( ! function_exists( 'wp_register_ability' ) ) {
 			return;
@@ -30,6 +33,7 @@ class CloseHub_Pattern_Abilities {
 	}
 
 	public static function register_abilities(): void {
+		self::$registry_blog_id = (int) get_current_blog_id();
 		self::ability(
 			'closehub/list-theme-patterns',
 			'List theme patterns',
@@ -74,8 +78,11 @@ class CloseHub_Pattern_Abilities {
 		$search   = trim( sanitize_text_field( $input['search'] ?? '' ) );
 
 		$patterns = [];
-		foreach ( WP_Block_Patterns_Registry::get_instance()->get_all_registered() as $pattern ) {
-			$patterns[] = self::registered_data( $pattern );
+		$stale    = self::registry_is_stale();
+		if ( ! $stale ) {
+			foreach ( WP_Block_Patterns_Registry::get_instance()->get_all_registered() as $pattern ) {
+				$patterns[] = self::registered_data( $pattern );
+			}
 		}
 		foreach ( self::synced_posts() as $post ) {
 			$patterns[] = self::synced_data( $post );
@@ -96,7 +103,11 @@ class CloseHub_Pattern_Abilities {
 			return true;
 		} ) );
 
-		return [ 'patterns' => $patterns, 'total' => count( $patterns ) ];
+		$result = [ 'patterns' => $patterns, 'total' => count( $patterns ) ];
+		if ( $stale ) {
+			$result['notice'] = 'Only synced patterns are listed: the registered theme, core and plugin patterns are loaded for another site of the network and cannot be read for this one.';
+		}
+		return $result;
 	}
 
 	public static function get_pattern( $input ): array|WP_Error {
@@ -115,11 +126,22 @@ class CloseHub_Pattern_Abilities {
 		if ( '' === $slug ) {
 			return new WP_Error( 'closehub_pattern_missing_identifier', 'Pass slug or id.', [ 'status' => 400 ] );
 		}
+		if ( self::registry_is_stale() ) {
+			return new WP_Error( 'closehub_patterns_other_site', 'Registered patterns are loaded for another site of the network. Use the id of a synced pattern on this site.', [ 'status' => 409 ] );
+		}
 		$pattern = WP_Block_Patterns_Registry::get_instance()->get_registered( $slug );
 		if ( ! is_array( $pattern ) ) {
 			return new WP_Error( 'closehub_pattern_not_found', 'Pattern not found.', [ 'status' => 404 ] );
 		}
 		return self::registered_data( $pattern ) + [ 'content' => (string) ( $pattern['content'] ?? '' ) ];
+	}
+
+	/**
+	 * switch_to_blog() does not rebuild the process-wide pattern registry, so after a switch it still holds the
+	 * patterns of the site that started the request. Never present those as the selected site's patterns.
+	 */
+	private static function registry_is_stale(): bool {
+		return is_multisite() && self::$registry_blog_id > 0 && (int) get_current_blog_id() !== self::$registry_blog_id;
 	}
 
 	/** @return WP_Post[] */

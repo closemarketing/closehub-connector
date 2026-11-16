@@ -37,7 +37,10 @@ function get_template(): string { return 'twentytwentyfive'; }
 function get_post( int $id ): ?WP_Post { foreach ( $GLOBALS['closehub_test_blocks'] as $post ) { if ( $post->ID === $id ) { return $post; } } return ( 5 === $id ) ? new WP_Post( 5, 'A page', 'a-page', 'body', 'page' ) : null; }
 function get_posts( array $args ): array { return array_values( array_filter( $GLOBALS['closehub_test_blocks'], static fn( WP_Post $p ): bool => $p->post_status === $args['post_status'] ) ); }
 function wp_get_post_terms( int $id, string $taxonomy, array $args ): array { return [ 'sections' ]; }
-function is_multisite(): bool { return false; }
+$GLOBALS['closehub_test_blog'] = 1;
+$GLOBALS['closehub_test_multisite'] = false;
+function is_multisite(): bool { return $GLOBALS['closehub_test_multisite']; }
+function get_current_blog_id(): int { return $GLOBALS['closehub_test_blog']; }
 
 require_once dirname( __DIR__ ) . '/includes/class-network.php';
 require_once dirname( __DIR__ ) . '/includes/class-pattern-abilities.php';
@@ -78,5 +81,16 @@ foreach ( [ [ 'slug' => 'nope/missing' ], [ 'id' => 91 ], [ 'id' => 5 ] ] as $ba
 }
 $none = CloseHub_Pattern_Abilities::get_pattern( [] );
 if ( ! $none instanceof WP_Error || 'closehub_pattern_missing_identifier' !== $none->code ) { closehub_pattern_fail( 'get without slug or id must fail.' ); }
+
+// After switch_to_blog() the registry still belongs to the first site: never present it as the selected site's.
+$GLOBALS['closehub_test_multisite'] = true;
+$GLOBALS['closehub_test_blog'] = 2;
+$other = CloseHub_Pattern_Abilities::list_patterns( [] );
+if ( [ 'footer-cta' ] !== array_column( $other['patterns'], 'slug' ) || empty( $other['notice'] ) ) { closehub_pattern_fail( 'On another site only synced patterns may be listed, with a notice.' ); }
+$other_get = CloseHub_Pattern_Abilities::get_pattern( [ 'slug' => 'twentytwentyfive/hero' ] );
+if ( ! $other_get instanceof WP_Error || 'closehub_patterns_other_site' !== $other_get->code ) { closehub_pattern_fail( 'Registered patterns must be refused on another site.' ); }
+if ( CloseHub_Pattern_Abilities::get_pattern( [ 'id' => 90 ] ) instanceof WP_Error ) { closehub_pattern_fail( 'Synced patterns must still work on another site.' ); }
+$GLOBALS['closehub_test_blog'] = 1;
+if ( 4 !== CloseHub_Pattern_Abilities::list_patterns( [] )['total'] ) { closehub_pattern_fail( 'The originating site keeps its registered patterns.' ); }
 
 echo "Pattern ability checks passed.\n";

@@ -28,6 +28,7 @@ phpstan.neon                    PHPStan config (level 5)
 .distignore                     Files excluded from the .zip release build
 includes/
     class-language-abilities.php MCP abilities for WPML languages (list/add/set default) and duplicate-post; link/unlink live in class-content-abilities.php, the WPML calls in class-wpml.php
+    class-translatepress.php    Optional TranslatePress bridge: languages (trp_settings), per-language post URLs, and the error WPML-only operations return on TranslatePress
     class-network.php           Multisite scope layer for MCP abilities (fanout / targeted / once) and the closehub/list-sites ability
     class-api-key.php           Generate, store, verify, and regenerate the API key; also authenticates it as an MCP Bearer token
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/
@@ -75,6 +76,8 @@ Abilities are wrapped at registration by `CloseHub_Network::execute()` / `permis
 Ability callbacks stay single-site (`switch_to_blog()` is done by the wrapper); never fan out inside a callback. Capabilities are checked per site after switching. On a single site the wrapper is a pass-through.
 
 Abilities registered by **other plugins** (`rank-math/*`, `wp-rocket/*`, `imagify/*`, `woocommerce/*`, `meta-box/*`…) are wrapped automatically on multisite by `CloseHub_Network::wrap_external_ability()`, hooked to `wp_register_ability_args`. They become `targeted`: `site_id` is added to the input schema, results are tagged with `site_id`/`site_url` (non-associative results go under `result`), and the output schema is widened to match. `closehub/`, `mcp-adapter/` and `core/` abilities are skipped; return `false` from the `closehub_network_wrap_ability` filter to opt another one out. A wrapped ability refuses to run (`closehub_plugin_inactive`) on a site where the plugin that defines its callback is neither active on that site nor network-active. Caveat: a plugin that caches its settings in memory per request (not via `get_option()`) can return the main site's values after `switch_to_blog()`; verify such abilities on a real network.
+
+TranslatePress keeps one post for every language, so `CloseHub_TranslatePress` only manages languages and reports `language_urls`; everything WPML-specific (`language`/`translation_of` on create, link/unlink, `duplicate-post`, `missing_translation`) returns `closehub_translatepress_unsupported`. It reads the current site's `trp_settings` option instead of TranslatePress' in-memory settings, and `add-language` is refused on a switched site (`closehub_translatepress_other_site`). `CloseHub_Language_Abilities` uses WPML when both plugins are active.
 
 WPML is one of those plugins: it loads its settings and active languages once per request and does not reload them on `switch_to_blog()`. `CloseHub_WPML` therefore reads the switched site's own `icl_languages` table and `icl_sitepress_settings` option, refuses `add-language`/`set-default-language` (`closehub_wpml_other_site`) while WPML's in-memory state belongs to another site, and makes `duplicate-post` use its plain copy instead of WPML's duplication in that case.
 

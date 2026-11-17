@@ -35,6 +35,8 @@ class CloseHub_Network {
 		'closehub/get-order-summary'       => self::FANOUT,
 		'closehub/flush-permalinks'        => self::FANOUT,
 		'closehub/get-post'                => self::TARGETED,
+		'closehub/list-theme-patterns'     => self::TARGETED, // Each site has its own theme, so patterns are never merged across sites.
+		'closehub/get-theme-pattern'       => self::TARGETED,
 		'closehub/update-post'             => self::TARGETED,
 		'closehub/upload-media'            => self::TARGETED,
 		'closehub/update-post-slug'        => self::TARGETED,

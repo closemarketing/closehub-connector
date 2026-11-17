@@ -136,6 +136,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
+= Unreleased =
+* Added the `closehub/list-theme-patterns` and `closehub/get-theme-pattern` MCP abilities: list the block patterns of the active theme, core, plugins and synced patterns as metadata only (optional `category` and `search`), then fetch the content of one by `slug` or synced `id`, so a client can build a landing page from existing patterns and save it as a draft with `create-post`. Both require `edit_posts`.
+
 = 1.3.1 =
 * Added MCP abilities to install or replace a plugin or theme from a zip (`install-plugin-zip`, `install-theme-zip`), with single-use deploy tickets for large uploads (`create-deploy-ticket`), `get-installed-version` and `rollback-package` to restore the backup taken before a replacement.
 * Added `parent_id` to `create-post` and `update-post` for hierarchical post types such as pages; `list-posts`/`get-post` return it.

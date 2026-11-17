@@ -50,6 +50,7 @@ function closehub_init(): void {
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-admin.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-network.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-content-abilities.php';
+	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-pattern-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-site-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-language-abilities.php';
 	require_once CLOSEHUB_PLUGIN_DIR . 'includes/class-package-installer.php';
@@ -66,6 +67,7 @@ function closehub_init(): void {
 	}
 
 	CloseHub_Content_Abilities::register();
+	CloseHub_Pattern_Abilities::register();
 	CloseHub_Site_Abilities::register();
 	CloseHub_Language_Abilities::register();
 	CloseHub_Network::register();

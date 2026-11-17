@@ -79,10 +79,15 @@ class Fake_WPDB {
 			}
 			return $out;
 		}
-		$post   = str_contains( $sql, 'post_parent_id' ) ? (int) array_shift( $params ) : 0;
+		$post     = str_contains( $sql, 'post_parent_id' ) ? (int) array_shift( $params ) : 0;
+		$captured = [];
+		if ( preg_match( '/o\.original IN \(([^)]*)\)/', $sql, $m ) ) {
+			$captured = array_splice( $params, 0, substr_count( $m[1], '%s' ) );
+		}
 		$search = str_contains( $sql, 'LIKE' ) ? trim( (string) array_shift( $params ), '%' ) : '';
 		foreach ( $GLOBALS['originals'] as $id => $text ) {
-			if ( ( ! $post || ( $GLOBALS['meta'][ $id ] ?? 0 ) === $post ) && ( '' === $search || str_contains( $text, $search ) ) ) {
+			$in_post = ( $GLOBALS['meta'][ $id ] ?? 0 ) === $post || in_array( $text, $captured, true );
+			if ( ( ! $post || $in_post ) && ( '' === $search || str_contains( $text, $search ) ) ) {
 				$out[] = (object) [ 'id' => $id, 'original' => $text ];
 			}
 		}
@@ -98,6 +103,8 @@ function get_locale(): string { return 'es_ES'; }
 function get_post( int $id ): ?WP_Post { return in_array( $id, [ 10, 11 ], true ) ? new WP_Post( $id ) : null; }
 function absint( mixed $v ): int { return abs( (int) $v ); }
 function is_wp_error( mixed $v ): bool { return $v instanceof WP_Error; }
+$GLOBALS['post_meta'] = [ 11 => [ 'Menu item', 'Never registered' ] ];
+function get_post_meta( int $id, string $key, bool $single ): mixed { return $GLOBALS['post_meta'][ $id ] ?? ''; }
 function ms_is_switched(): bool { return $GLOBALS['switched']; }
 function trp_sanitize_string( string $s ): string { return strip_tags( $s, '<strong><em><a><br>' ); }
 function do_action( string $hook, mixed ...$args ): void { $GLOBALS['actions'][] = $hook; }
@@ -138,6 +145,9 @@ check( [ 1 ] === array_column( $search['strings'], 'original_id' ), 'search find
 
 $paged = CloseHub_TranslatePress::strings( [ 'post_id' => 10, 'per_page' => 2, 'page' => 2 ] );
 check( 3 === $paged['total'] && 2 === $paged['total_pages'] && [ 4 ] === array_column( $paged['strings'], 'original_id' ), 'Results are paginated.' );
+
+$captured = CloseHub_TranslatePress::strings( [ 'post_id' => 11, 'only_missing' => false ] );
+check( [ 1, 5 ] === array_column( $captured['strings'], 'original_id' ), 'Strings captured on the last render are listed with the linked ones.' );
 
 $empty = CloseHub_TranslatePress::strings( [ 'post_id' => 11, 'search' => 'nothing' ] );
 check( 0 === $empty['total'] && isset( $empty['notice'] ), 'A post without registered strings explains how to render it.' );

@@ -250,24 +250,70 @@ class CloseHub_TranslatePress {
 		return $requested;
 	}
 
+	private const CAPTURE_ARG  = 'closehub_trp_capture';
+	private const STRINGS_META = '_closehub_trp_strings';
+
+	/** Hooks that only matter while TranslatePress renders a page that render_post() requested. */
+	public static function register(): void {
+		if ( isset( $_GET[ self::CAPTURE_ARG ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- validated against a transient below.
+			add_filter( 'trp_translateable_strings', [ self::class, 'capture_strings' ], 999 );
+		}
+	}
+
 	/**
-	 * Request the post in every translation language so TranslatePress registers its strings, like a first visit does.
-	 * The query argument skips page caches, which would otherwise serve HTML without running TranslatePress.
+	 * Record the strings TranslatePress found while rendering a page requested by render_post(). Many themes (Divi
+	 * among them) render content outside the_content, so TranslatePress never links those strings to the post in
+	 * trp_original_meta: capturing what it actually parsed is the only reliable list. Only runs for a valid token.
+	 */
+	public static function capture_strings( $information ) {
+		$token = sanitize_key( (string) wp_unslash( $_GET[ self::CAPTURE_ARG ] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$key   = 'closehub_trp_capture_' . $token;
+		if ( '' === $token || ! is_array( $information ) || false === get_transient( $key ) ) {
+			return $information;
+		}
+		$captured = (array) get_transient( $key . '_strings' );
+		foreach ( (array) ( $information['translateable_strings'] ?? [] ) as $string ) {
+			if ( is_string( $string ) && '' !== trim( $string ) ) {
+				$captured[ $string ] = true;
+			}
+		}
+		set_transient( $key . '_strings', $captured, 5 * MINUTE_IN_SECONDS );
+		return $information;
+	}
+
+	/**
+	 * Request the post in every translation language so TranslatePress registers its strings, like a first visit
+	 * does, and keep the list of strings it parsed on the post. The query argument also skips page caches, which
+	 * would otherwise serve HTML without running TranslatePress.
 	 *
 	 * @return array<string, int|string> language => HTTP status or error message
 	 */
 	private static function render_post( int $post_id, array $languages ): array {
-		$urls   = self::details( $post_id )['language_urls'] ?? [];
+		$urls  = self::details( $post_id )['language_urls'] ?? [];
+		$token = strtolower( wp_generate_password( 24, false ) );
+		$key   = 'closehub_trp_capture_' . $token;
+		set_transient( $key, 1, 5 * MINUTE_IN_SECONDS );
 		$result = [];
 		foreach ( $languages as $code ) {
 			if ( empty( $urls[ $code ] ) ) {
 				$result[ $code ] = 'no public URL (only published posts can be rendered)';
 				continue;
 			}
-			$response        = wp_remote_get( add_query_arg( 'closehub_trp_render', (string) time(), $urls[ $code ] ), [ 'timeout' => 60, 'sslverify' => false, 'redirection' => 3 ] );
+			$response        = wp_remote_get( add_query_arg( self::CAPTURE_ARG, $token, $urls[ $code ] ), [ 'timeout' => 60, 'sslverify' => false, 'redirection' => 3 ] );
 			$result[ $code ] = is_wp_error( $response ) ? $response->get_error_message() : (int) wp_remote_retrieve_response_code( $response );
 		}
+		$captured = array_keys( (array) get_transient( $key . '_strings' ) );
+		delete_transient( $key );
+		delete_transient( $key . '_strings' );
+		if ( $captured ) {
+			update_post_meta( $post_id, self::STRINGS_META, wp_slash( array_values( array_map( 'strval', $captured ) ) ) );
+		}
 		return $result;
+	}
+
+	/** @return string[] Strings captured the last time the post was rendered with render=true. */
+	private static function captured_strings( int $post_id ): array {
+		return array_values( array_filter( array_map( 'strval', (array) get_post_meta( $post_id, self::STRINGS_META, true ) ) ) );
 	}
 
 	/**
@@ -299,8 +345,15 @@ class CloseHub_TranslatePress {
 		$where           = [];
 		$params          = [];
 		if ( $post_id ) {
-			$where[]  = "o.id IN ( SELECT m.original_id FROM {$query->get_table_name_for_original_meta()} m WHERE m.meta_key = 'post_parent_id' AND m.meta_value = %s )";
-			$params[] = (string) $post_id;
+			// Strings TranslatePress linked to the post, plus the ones captured when it was last rendered.
+			$post_where = "o.id IN ( SELECT m.original_id FROM {$query->get_table_name_for_original_meta()} m WHERE m.meta_key = 'post_parent_id' AND m.meta_value = %s )";
+			$params[]   = (string) $post_id;
+			$captured   = self::captured_strings( $post_id );
+			if ( $captured ) {
+				$post_where .= ' OR o.original IN ( ' . implode( ',', array_fill( 0, count( $captured ), '%s' ) ) . ' )';
+				$params      = array_merge( $params, $captured );
+			}
+			$where[] = '( ' . $post_where . ' )';
 		}
 		if ( '' !== $search ) {
 			$where[]  = 'o.original LIKE %s';
@@ -347,7 +400,7 @@ class CloseHub_TranslatePress {
 			$result['rendered'] = $rendered;
 		}
 		if ( $post_id && ! $rows ) {
-			$result['notice'] = 'TranslatePress has not registered any string of this post yet. Pass render=true to render it in every translation language first.';
+			$result['notice'] = 'No string of this post is known yet. Pass render=true to render it in every translation language first.';
 		}
 		return $result;
 	}

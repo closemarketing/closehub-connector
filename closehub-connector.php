@@ -69,5 +69,6 @@ function closehub_init(): void {
 	CloseHub_Content_Abilities::register();
 	CloseHub_Site_Abilities::register();
 	CloseHub_Language_Abilities::register();
+	CloseHub_TranslatePress::register();
 	CloseHub_Network::register();
 }

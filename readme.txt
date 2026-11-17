@@ -27,6 +27,8 @@ When WPML is active, create-post and `POST /closehub/v1/posts` also accept `lang
 
 When TranslatePress is active instead, the language abilities (`list-languages`, `add-language`, `set-default-language`) manage its languages, and `get-post`/`list-posts`/`create-post` responses return `language` (the default language the content is written in) and `language_urls` with the URL of a published post in every published language. TranslatePress translates one post into every language, so `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` answer with `closehub_translatepress_unsupported`. If both plugins are active WPML is used.
 
+With TranslatePress, `closehub/list-string-translations` lists the strings of a post (or every string containing `search`) with their translation and status per language, and `closehub/save-string-translations` saves translations for one language as human reviewed, so an MCP client can translate content itself instead of spending automatic translation quota.
+
 For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
 
 It also exposes a set of "site" abilities for the CLOSE web go-live checklist — configuration steps that used to be manual or wp-cli only. Each requires the WordPress capability noted below.
@@ -140,6 +142,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 = Unreleased =
 * Added TranslatePress support: `list-languages` and `add-language` manage its languages (including whether each is published and its URL slug), `set-default-language` explains that TranslatePress cannot change its default language without orphaning translations, and post responses include `language` and `language_urls` (the URL of a published post in every published language). Adding a language purges the page cache.
+* Added `closehub/list-string-translations` and `closehub/save-string-translations` (TranslatePress, `manage_options` or the `trp_translating_capability` filter): list a post's strings or search site-wide strings with their translation per language (`render: true` renders the post in each language first so TranslatePress registers its strings), then save translations by `original_id` or exact original text as human reviewed. The page cache of `post_id` (or the whole site) is purged after saving.
 * With TranslatePress active, `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` now answer `closehub_translatepress_unsupported` instead of asking for WPML. WPML is used when both plugins are active.
 
 = 1.3.1 =

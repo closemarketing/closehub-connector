@@ -17,6 +17,8 @@ class CloseHub_Language_Abilities {
 		'closehub/add-language',
 		'closehub/set-default-language',
 		'closehub/duplicate-post',
+		'closehub/list-string-translations',
+		'closehub/save-string-translations',
 	];
 
 	public static function register(): void {
@@ -51,6 +53,25 @@ class CloseHub_Language_Abilities {
 			'link'        => [ 'type' => 'boolean', 'default' => true, 'description' => 'Link each copy to the original as its translation. false keeps it unlinked.' ],
 			'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
 		], [ 'post_id', 'languages' ] );
+		self::ability( 'closehub/list-string-translations', 'List string translations', 'TranslatePress only. List the strings TranslatePress translates for a post (its title and content, as TranslatePress splits them: a paragraph with bold text or a link becomes several strings) and/or every string containing search (menus, buttons, footer), with the translation and status in each language. Strings only exist once the post has been rendered in a translated language: pass render=true to do that first. Translate fragments of one sentence so they read naturally once joined, then save them with save-string-translations.', [ self::class, 'list_string_translations' ], [ CloseHub_TranslatePress::class, 'can_translate' ], true, true, [
+			'post_id'      => [ 'type' => 'integer', 'description' => 'Post, page or product whose strings to list.' ],
+			'search'       => [ 'type' => 'string', 'description' => 'Only strings whose original contains this text. Without post_id it searches every string of the site.' ],
+			'languages'    => [ 'type' => 'array', 'items' => [ 'type' => 'string' ], 'description' => 'Translation language codes (e.g. "en_GB"). Default: every translation language.' ],
+			'only_missing' => [ 'type' => 'boolean', 'default' => true, 'description' => 'Only strings not translated yet in at least one of the languages.' ],
+			'render'       => [ 'type' => 'boolean', 'default' => false, 'description' => 'Request the published post in each language first so TranslatePress registers new strings.' ],
+			'page'         => [ 'type' => 'integer', 'default' => 1 ],
+			'per_page'     => [ 'type' => 'integer', 'default' => 200, 'description' => 'Up to 500.' ],
+		] );
+		self::ability( 'closehub/save-string-translations', 'Save string translations', 'TranslatePress only. Save translations for one language, marked as human reviewed so automatic translation never overwrites them. Identify each string by original_id from list-string-translations, or by its exact original text. Purges the page cache of post_id (or the whole site without it) unless clear_cache is false.', [ self::class, 'save_string_translations' ], [ CloseHub_TranslatePress::class, 'can_translate' ], false, true, [
+			'language'     => [ 'type' => 'string', 'description' => 'Translation language code, e.g. "en_GB".' ],
+			'translations' => [ 'type' => 'array', 'description' => 'Up to 500 items.', 'items' => [ 'type' => 'object', 'properties' => [
+				'original_id' => [ 'type' => 'integer' ],
+				'original'    => [ 'type' => 'string', 'description' => 'Exact original text, when original_id is not known.' ],
+				'translated'  => [ 'type' => 'string' ],
+			], 'required' => [ 'translated' ] ] ],
+			'post_id'      => [ 'type' => 'integer', 'description' => 'Post whose page cache to purge.' ],
+			'clear_cache'  => [ 'type' => 'boolean', 'default' => true ],
+		], [ 'language', 'translations' ] );
 	}
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
@@ -98,6 +119,31 @@ class CloseHub_Language_Abilities {
 			return CloseHub_TranslatePress::set_default_language( (string) ( $input['language'] ?? '' ) );
 		}
 		return CloseHub_WPML::set_default_language( (string) ( $input['language'] ?? '' ) );
+	}
+
+	public static function list_string_translations( $input ): array|WP_Error {
+		$input = is_array( $input ) ? $input : [];
+		return CloseHub_TranslatePress::strings( [
+			'post_id'      => absint( $input['post_id'] ?? 0 ),
+			'search'       => sanitize_text_field( (string) ( $input['search'] ?? '' ) ),
+			'languages'    => array_map( 'sanitize_text_field', (array) ( $input['languages'] ?? [] ) ),
+			'only_missing' => ! isset( $input['only_missing'] ) || ! empty( $input['only_missing'] ),
+			'render'       => ! empty( $input['render'] ),
+			'page'         => absint( $input['page'] ?? 1 ),
+			'per_page'     => absint( $input['per_page'] ?? 200 ),
+		] );
+	}
+
+	public static function save_string_translations( $input ): array|WP_Error {
+		$input   = is_array( $input ) ? $input : [];
+		$post_id = absint( $input['post_id'] ?? 0 );
+		$result  = CloseHub_TranslatePress::save_strings( sanitize_text_field( (string) ( $input['language'] ?? '' ) ), array_values( array_filter( (array) ( $input['translations'] ?? [] ), 'is_array' ) ) );
+		if ( is_wp_error( $result ) || ! $result['saved'] || ! ( $input['clear_cache'] ?? true ) ) {
+			return $result;
+		}
+		$cache           = CloseHub_Site_Abilities::clear_cache( $post_id ? [ 'scope' => 'posts', 'post_ids' => [ $post_id ] ] : [ 'scope' => 'all' ] );
+		$result['cache'] = is_wp_error( $cache ) ? [ 'cleared' => false, 'reason' => $cache->get_error_message() ] : $cache;
+		return $result;
 	}
 
 	public static function duplicate_post( $input ): array|WP_Error {

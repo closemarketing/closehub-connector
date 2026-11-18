@@ -31,6 +31,8 @@ class CloseHub_Network {
 		'closehub/add-language'            => self::TARGETED,
 		'closehub/set-default-language'    => self::TARGETED,
 		'closehub/duplicate-post'          => self::TARGETED,
+		'closehub/list-string-translations' => self::TARGETED, // Tied to one site's post IDs and dictionary tables.
+		'closehub/save-string-translations' => self::TARGETED,
 		'closehub/create-post'             => self::TARGETED, // A write: never create one copy per site just because site_id was forgotten.
 		'closehub/get-order-summary'       => self::FANOUT,
 		'closehub/flush-permalinks'        => self::FANOUT,

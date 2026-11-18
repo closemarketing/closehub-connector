@@ -2,6 +2,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/class-translatepress.php';
+
 class CloseHub_REST_API {
 
 	const NAMESPACE = 'closehub/v1';
@@ -568,7 +570,7 @@ class CloseHub_REST_API {
 	}
 
 	private function post_response( int $post_id ): array {
-		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ), 'parent_id' => (int) wp_get_post_parent_id( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id );
+		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ), 'parent_id' => (int) wp_get_post_parent_id( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id ) + CloseHub_TranslatePress::details( $post_id );
 	}
 
 	/**

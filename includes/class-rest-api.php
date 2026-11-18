@@ -99,6 +99,17 @@ class CloseHub_REST_API {
 			],
 		] );
 
+		register_rest_route( self::NAMESPACE, '/woocommerce/store-stats', [
+			'methods'             => WP_REST_Server::READABLE,
+			'callback'            => [ $this, 'get_woocommerce_store_stats' ],
+			'permission_callback' => [ $this, 'check_api_key' ],
+			'args'                => [
+				'after'  => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'before' => [ 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
+				'top'    => [ 'required' => false, 'type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 50 ],
+			],
+		] );
+
 		// ── Gravity Forms ──────────────────────────────────────────────────────
 		register_rest_route( self::NAMESPACE, '/gravity-forms/forms', [
 			'methods'             => WP_REST_Server::READABLE,
@@ -295,6 +306,10 @@ class CloseHub_REST_API {
 
 	public function get_woocommerce_orders( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		return $this->respond( fn() => $this->get_woocommerce_orders_data( $request ) );
+	}
+
+	public function get_woocommerce_store_stats( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+		return $this->respond( fn() => $this->get_woocommerce_store_stats_data( $request ) );
 	}
 
 	public function create_elm_release( WP_REST_Request $request ): WP_REST_Response|WP_Error {
@@ -786,6 +801,74 @@ class CloseHub_REST_API {
 			'average_order' => $count > 0 ? round( $total_sales / $count, 2 ) : 0.0,
 			'orders'        => $items,
 		];
+	}
+
+	/**
+	 * Best sellers, best customers, new customers, buying hours and unpaid
+	 * orders of a period. Customer e-mails never leave the site: see
+	 * CloseHub_WooCommerce_Stats.
+	 */
+	private function get_woocommerce_store_stats_data( WP_REST_Request $request ): array|WP_Error {
+		if ( ! function_exists( 'wc_get_orders' ) ) {
+			return new WP_Error( 'closehub_woo_missing', 'WooCommerce is not active.', [ 'status' => 503 ] );
+		}
+
+		$after  = $request->get_param( 'after' );
+		$before = $request->get_param( 'before' );
+		$paid   = [ 'wc-completed', 'wc-processing' ];
+
+		$rows = static function ( array $statuses ) use ( $after, $before ): array {
+			// `type` matters: by default wc_get_orders() also returns refunds (negative
+			// totals, no billing data), which would be a fatal error below.
+			$orders = wc_get_orders( [
+				'type'        => 'shop_order',
+				'status'      => $statuses,
+				'date_after'  => $after,
+				'date_before' => $before,
+				'limit'       => -1,
+				'return'      => 'objects',
+			] );
+
+			return array_map( static function ( $order ): array {
+				$items = [];
+				foreach ( $order->get_items() as $item ) {
+					$items[] = [
+						'id'       => (int) ( $item->get_product_id() ),
+						'name'     => $item->get_name(),
+						'quantity' => (int) $item->get_quantity(),
+						'total'    => (float) $item->get_total(),
+					];
+				}
+
+				$created = $order->get_date_created();
+				$date    = $created ? ( new DateTimeImmutable( '@' . $created->getTimestamp() ) )->setTimezone( wp_timezone() ) : new DateTimeImmutable( 'now', wp_timezone() );
+
+				return [
+					'email'   => (string) $order->get_billing_email(),
+					'name'    => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
+					'company' => (string) $order->get_billing_company(),
+					'total'   => (float) $order->get_total(),
+					'date'    => $date,
+					'items'   => $items,
+				];
+			}, $orders );
+		};
+
+		$bought_before = static fn( string $email ): bool => (bool) wc_get_orders( [
+			'type'          => 'shop_order',
+			'status'        => $paid,
+			'billing_email' => $email,
+			'date_before'   => $after,
+			'limit'         => 1,
+			'return'        => 'ids',
+		] );
+
+		return CloseHub_WooCommerce_Stats::build(
+			$rows( $paid ),
+			$rows( [ 'wc-pending', 'wc-failed', 'wc-checkout-draft' ] ),
+			$bought_before,
+			(int) ( $request->get_param( 'top' ) ?: 10 )
+		);
 	}
 
 	/**

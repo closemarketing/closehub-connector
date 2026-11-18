@@ -31,6 +31,7 @@ includes/
     class-network.php           Multisite scope layer for MCP abilities (fanout / targeted / once) and the closehub/list-sites ability
     class-api-key.php           Generate, store, verify, and regenerate the API key; also authenticates it as an MCP Bearer token
     class-rest-api.php          All REST endpoints under /wp-json/closehub/v1/
+    class-woocommerce-stats.php Store statistics maths for GET /woocommerce/store-stats, on plain order rows so it is testable without WordPress
     class-admin.php             Settings → CloseHub admin page
     class-oauth.php             MCP OAuth 2.1 + PKCE authorization server
     class-pattern-abilities.php MCP abilities to read block patterns (list-theme-patterns metadata only, get-theme-pattern content) so a client can build landing pages and send them to create-post
@@ -48,6 +49,7 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 | POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status`, `categories`, `featured_image_url`, `seo_title`, `seo_description`, `seo_focus_keyword` |
 | PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create, all optional here; an omitted `seo_*` field keeps its stored value, an empty string clears it |
 | GET | `/woocommerce/orders` | `get_woocommerce_orders()` | Returns order count, total sales, average order; args: `after`, `before`, `status` |
+| GET | `/woocommerce/store-stats` | `get_woocommerce_store_stats()` | Best sellers, best customers (display name only, never the e-mail), new customers, orders by weekday × hour slot and unpaid orders (pending/failed/draft checkout) of a period; args: `after`, `before`, `top` (1–50, default 10). The maths lives in `CloseHub_WooCommerce_Stats` |
 | GET | `/gravity-forms/forms` | `list_forms()` | Lists all forms with entry count |
 | GET | `/gravity-forms/forms/{id}` | `get_form()` | Form details + last entry date |
 | GET | `/gravity-forms/forms/{id}/entries` | `get_form_entries()` | Entry count for a date range |

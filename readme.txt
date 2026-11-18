@@ -73,6 +73,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, categories, and WPML `language`/`translation_of` when WPML is active
 * `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
+* `GET /closehub/v1/woocommerce/store-stats` — best sellers, best customers, new customers, buying hours and unpaid orders (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
 * `GET /closehub/v1/gravity-forms/forms/{id}/entries` — count form entries by date range

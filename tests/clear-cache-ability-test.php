@@ -97,4 +97,28 @@ $second = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all' ] );
 if ( is_wp_error( $second ) || false !== $second['cleared'] ) { closehub_fail( 'A domain purge after one already ran in this request should report cleared=false.' ); }
 if ( $GLOBALS['closehub_test_rocket_log'] ) { closehub_fail( 'rocket_clean_domain() should not be called twice in one request.' ); }
 
+// ── LiteSpeed Cache: used when WP Rocket is not active ────────────────────────
+$GLOBALS['closehub_test_rocket_on']    = false;
+$GLOBALS['closehub_test_rocket_log']   = [];
+$GLOBALS['closehub_test_litespeed_log'] = [];
+$GLOBALS['closehub_test_post_status']  = [ 10 => 'publish', 11 => 'auto-draft' ];
+
+function has_action( string $hook ): bool { return in_array( $hook, [ 'litespeed_purge_all', 'litespeed_purge_post' ], true ); }
+function do_action( string $hook, ...$args ): void { $GLOBALS['closehub_test_litespeed_log'][] = $hook . ( $args && 'litespeed_purge_post' === $hook ? ':' . $args[0] : '' ); }
+function get_post_status( int $post_id ) { return $GLOBALS['closehub_test_post_status'][ $post_id ] ?? false; }
+
+$no_litespeed = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all' ] );
+if ( ! $no_litespeed instanceof WP_Error || ! str_contains( $no_litespeed->message, 'LiteSpeed Cache' ) ) { closehub_fail( 'No-provider error should list LiteSpeed Cache as supported.' ); }
+
+define( 'LSCWP_V', '7.0' );
+
+$ls_all = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all', 'minify' => true ] );
+if ( [ 'provider' => 'litespeed', 'scope' => 'all', 'cleared' => true, 'post_ids' => [], 'minify_cleared' => true ] !== $ls_all ) { closehub_fail( 'LiteSpeed scope=all returned an unexpected result: ' . var_export( $ls_all, true ) ); }
+if ( [ 'litespeed_purge_all' ] !== $GLOBALS['closehub_test_litespeed_log'] || $GLOBALS['closehub_test_rocket_log'] ) { closehub_fail( 'LiteSpeed scope=all should only fire litespeed_purge_all.' ); }
+
+$GLOBALS['closehub_test_litespeed_log'] = [];
+$ls_posts = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'posts', 'post_ids' => [ 10, 11 ], 'minify' => true ] );
+if ( is_wp_error( $ls_posts ) || [ 10 ] !== $ls_posts['post_ids'] || [ 11 ] !== $ls_posts['failed_post_ids'] || true !== $ls_posts['cleared'] || false !== $ls_posts['minify_cleared'] ) { closehub_fail( 'LiteSpeed scope=posts returned an unexpected result: ' . var_export( $ls_posts, true ) ); }
+if ( [ 'litespeed_purge_post:10' ] !== $GLOBALS['closehub_test_litespeed_log'] ) { closehub_fail( 'LiteSpeed scope=posts should fire litespeed_purge_post only for purgeable posts.' ); }
+
 echo "Clear cache ability checks passed.\n";

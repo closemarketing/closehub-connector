@@ -279,7 +279,11 @@ class CloseHub_Site_Abilities {
 			update_post_meta( $post_id, '_yoast_wpseo_meta-robots-noindex', $noindex ? '1' : '0' );
 		} elseif ( defined( 'SEOPRESS_VERSION' ) ) {
 			// SEOPress stores 'yes' when the per-post noindex checkbox is ticked and drops the meta otherwise.
-			$noindex ? update_post_meta( $post_id, '_seopress_robots_index', 'yes' ) : delete_post_meta( $post_id, '_seopress_robots_index' );
+			if ( $noindex ) {
+				update_post_meta( $post_id, '_seopress_robots_index', 'yes' );
+			} else {
+				delete_post_meta( $post_id, '_seopress_robots_index' );
+			}
 		} else {
 			return new WP_Error( 'closehub_seo_plugin_missing', 'No supported SEO plugin (Rank Math, Yoast or SEOPress) is active.', [ 'status' => 503 ] );
 		}

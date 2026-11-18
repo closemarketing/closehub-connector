@@ -18,6 +18,9 @@ function sanitize_email( string $value ): string { return trim( $value ); }
 function sanitize_user( string $value, bool $strict = false ): string { return trim( $value ); }
 function is_email( string $value ): bool { return (bool) filter_var( $value, FILTER_VALIDATE_EMAIL ); }
 function get_post( int $id ) { return $GLOBALS['closehub_test_post']; }
+$GLOBALS['closehub_test_meta'] = [];
+function update_post_meta( int $post_id, string $key, $value ): bool { $GLOBALS['closehub_test_meta'][ $post_id ][ $key ] = $value; return true; }
+function delete_post_meta( int $post_id, string $key ): bool { unset( $GLOBALS['closehub_test_meta'][ $post_id ][ $key ] ); return true; }
 
 /** Minimal re-implementation of WP core's is_serialized(), enough for the values these tests exercise. */
 function is_serialized( $data ): bool {
@@ -73,5 +76,15 @@ if ( ! CloseHub_Site_Abilities::can_create_user( [ 'role' => 'administrator' ] )
 $GLOBALS['closehub_test_post'] = null;
 $missing_post                 = CloseHub_Site_Abilities::set_post_noindex( [ 'post_id' => 999, 'noindex' => true ] );
 if ( ! $missing_post instanceof WP_Error ) { fwrite( STDERR, "set_post_noindex should reject a missing post.\n" ); exit( 1 ); }
+
+// ── set_post_noindex: no SEO plugin, then SEOPress ────────────────────────────
+$GLOBALS['closehub_test_post'] = (object) [ 'ID' => 42 ];
+$no_plugin = CloseHub_Site_Abilities::set_post_noindex( [ 'post_id' => 42, 'noindex' => true ] );
+if ( ! $no_plugin instanceof WP_Error || 'closehub_seo_plugin_missing' !== $no_plugin->code || ! str_contains( $no_plugin->message, 'SEOPress' ) ) { fwrite( STDERR, "Without an SEO plugin, set_post_noindex should list SEOPress among the supported ones.\n" ); exit( 1 ); }
+define( 'SEOPRESS_VERSION', '9.0' );
+$on = CloseHub_Site_Abilities::set_post_noindex( [ 'post_id' => 42, 'noindex' => true ] );
+if ( [ 'post_id' => 42, 'noindex' => true ] !== $on || 'yes' !== ( $GLOBALS['closehub_test_meta'][42]['_seopress_robots_index'] ?? null ) ) { fwrite( STDERR, "SEOPress noindex should store _seopress_robots_index = 'yes'.\n" ); exit( 1 ); }
+CloseHub_Site_Abilities::set_post_noindex( [ 'post_id' => 42, 'noindex' => false ] );
+if ( array_key_exists( '_seopress_robots_index', $GLOBALS['closehub_test_meta'][42] ) ) { fwrite( STDERR, "Clearing SEOPress noindex should delete the meta, as SEOPress does.\n" ); exit( 1 ); }
 
 echo "Site ability request checks passed.\n";

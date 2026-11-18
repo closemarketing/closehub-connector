@@ -64,6 +64,8 @@ $expected = [
 	'closehub/add-language',
 	'closehub/set-default-language',
 	'closehub/duplicate-post',
+	'closehub/list-string-translations',
+	'closehub/save-string-translations',
 	'closehub/list-sites',
 ];
 

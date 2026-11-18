@@ -31,10 +31,14 @@ class CloseHub_Network {
 		'closehub/add-language'            => self::TARGETED,
 		'closehub/set-default-language'    => self::TARGETED,
 		'closehub/duplicate-post'          => self::TARGETED,
+		'closehub/list-string-translations' => self::TARGETED, // Tied to one site's post IDs and dictionary tables.
+		'closehub/save-string-translations' => self::TARGETED,
 		'closehub/create-post'             => self::TARGETED, // A write: never create one copy per site just because site_id was forgotten.
 		'closehub/get-order-summary'       => self::FANOUT,
 		'closehub/flush-permalinks'        => self::FANOUT,
 		'closehub/get-post'                => self::TARGETED,
+		'closehub/list-theme-patterns'     => self::TARGETED, // Each site has its own theme, so patterns are never merged across sites.
+		'closehub/get-theme-pattern'       => self::TARGETED,
 		'closehub/update-post'             => self::TARGETED,
 		'closehub/upload-media'            => self::TARGETED,
 		'closehub/update-post-slug'        => self::TARGETED,

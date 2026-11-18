@@ -2,8 +2,11 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/class-translatepress.php';
+
 /**
- * MCP abilities to manage WPML languages and duplicate content between them.
+ * MCP abilities to manage WPML or TranslatePress languages and, with WPML, duplicate content between them.
+ * TranslatePress keeps one post for every language, so only the language abilities apply to it.
  * Linking existing posts as translations lives in CloseHub_Content_Abilities
  * (link-translations / unlink-translation); creating a brand-new translation
  * is create-post with `language` (+ `translation_of` to link it).
@@ -14,6 +17,8 @@ class CloseHub_Language_Abilities {
 		'closehub/add-language',
 		'closehub/set-default-language',
 		'closehub/duplicate-post',
+		'closehub/list-string-translations',
+		'closehub/save-string-translations',
 	];
 
 	public static function register(): void {
@@ -31,21 +36,42 @@ class CloseHub_Language_Abilities {
 	}
 
 	public static function register_abilities(): void {
-		self::ability( 'closehub/list-languages', 'List languages', 'List the active WPML languages and which one is the default. Set include_available to also list the supported languages that can still be added with add-language.', [ self::class, 'list_languages' ], [ self::class, 'can_list_languages' ], true, true, [
+		self::ability( 'closehub/list-languages', 'List languages', 'List the languages of the multilingual plugin (WPML or TranslatePress) and which one is the default. With TranslatePress each language also tells whether visitors see it (published) and its URL slug, and codes are locales such as "fr_FR". Set include_available to also list the supported languages that can still be added with add-language.', [ self::class, 'list_languages' ], [ self::class, 'can_list_languages' ], true, true, [
 			'include_available' => [ 'type' => 'boolean', 'default' => false ],
 		] );
-		self::ability( 'closehub/add-language', 'Add language', 'Activate a language supported by WPML (see list-languages with include_available). Existing content is not changed.', [ self::class, 'add_language' ], [ self::class, 'can_manage_languages' ], false, true, [
-			'language' => [ 'type' => 'string', 'description' => 'WPML language code, e.g. "fr".' ],
+		self::ability( 'closehub/add-language', 'Add language', 'Activate a language supported by WPML, or add one to translate into with TranslatePress (see list-languages with include_available). Existing content is not changed. With TranslatePress the language tables and WordPress language pack are created, and publish=false adds it without showing it to visitors yet.', [ self::class, 'add_language' ], [ self::class, 'can_manage_languages' ], false, true, [
+			'language' => [ 'type' => 'string', 'description' => 'Language code from list-languages: WPML "fr", TranslatePress locale "fr_FR".' ],
+			'publish'  => [ 'type' => 'boolean', 'default' => true, 'description' => 'TranslatePress only. Make the language visible to visitors right away.' ],
+			'clear_cache' => [ 'type' => 'boolean', 'default' => true, 'description' => 'TranslatePress only. Purge the page cache after adding the language.' ],
 		], [ 'language' ] );
-		self::ability( 'closehub/set-default-language', 'Set default language', 'Make an already active WPML language the site default. Changing it affects URLs and language fallbacks of the whole site, so confirm with the user first.', [ self::class, 'set_default_language' ], [ self::class, 'can_manage_languages' ], false, true, [
-			'language' => [ 'type' => 'string', 'description' => 'Active WPML language code.' ],
+		self::ability( 'closehub/set-default-language', 'Set default language', 'Make an already active WPML language the site default. Changing it affects URLs and language fallbacks of the whole site, so confirm with the user first. Not available with TranslatePress, which would orphan its existing translations.', [ self::class, 'set_default_language' ], [ self::class, 'can_manage_languages' ], false, true, [
+			'language' => [ 'type' => 'string', 'description' => 'Active language code from list-languages.' ],
 		], [ 'language' ], true );
-		self::ability( 'closehub/duplicate-post', 'Duplicate post to another language', 'Copy an existing original post (or page, product, etc.) into one or more other languages as new drafts. By default each copy is linked to the original as its translation; pass link=false to create independent copies that are not linked. To write a translation from scratch use create-post with language and translation_of.', [ self::class, 'duplicate_post' ], [ self::class, 'can_duplicate_post' ], false, false, [
+		self::ability( 'closehub/duplicate-post', 'Duplicate post to another language', 'WPML only. Copy an existing original post (or page, product, etc.) into one or more other languages as new drafts. By default each copy is linked to the original as its translation; pass link=false to create independent copies that are not linked. To write a translation from scratch use create-post with language and translation_of.', [ self::class, 'duplicate_post' ], [ self::class, 'can_duplicate_post' ], false, false, [
 			'post_id'     => [ 'type' => 'integer', 'description' => 'Existing original post to copy.' ],
 			'languages'   => [ 'type' => 'array', 'items' => [ 'type' => 'string' ], 'description' => 'Target WPML language codes.' ],
 			'link'        => [ 'type' => 'boolean', 'default' => true, 'description' => 'Link each copy to the original as its translation. false keeps it unlinked.' ],
 			'clear_cache' => [ 'type' => 'boolean', 'default' => true ],
 		], [ 'post_id', 'languages' ] );
+		self::ability( 'closehub/list-string-translations', 'List string translations', 'TranslatePress only. List the strings TranslatePress translates for a post (its title and content, as TranslatePress splits them: a paragraph with bold text or a link becomes several strings) and/or every string containing search (menus, buttons, footer), with the translation and status in each language. Pass render=true the first time (and after the post changes): it renders the published post in every language and records the strings TranslatePress parsed, including menus, footer and SEO meta of that page. Translate fragments of one sentence so they read naturally once joined, then save them with save-string-translations.', [ self::class, 'list_string_translations' ], [ CloseHub_TranslatePress::class, 'can_translate' ], true, true, [
+			'post_id'      => [ 'type' => 'integer', 'description' => 'Post, page or product whose strings to list.' ],
+			'search'       => [ 'type' => 'string', 'description' => 'Only strings whose original contains this text. Without post_id it searches every string of the site.' ],
+			'languages'    => [ 'type' => 'array', 'items' => [ 'type' => 'string' ], 'description' => 'Translation language codes (e.g. "en_GB"). Default: every translation language.' ],
+			'only_missing' => [ 'type' => 'boolean', 'default' => true, 'description' => 'Only strings not translated yet in at least one of the languages.' ],
+			'render'       => [ 'type' => 'boolean', 'default' => false, 'description' => 'Request the published post in each language first so TranslatePress registers new strings.' ],
+			'page'         => [ 'type' => 'integer', 'default' => 1 ],
+			'per_page'     => [ 'type' => 'integer', 'default' => 200, 'description' => 'Up to 500.' ],
+		] );
+		self::ability( 'closehub/save-string-translations', 'Save string translations', 'TranslatePress only. Save translations for one language, marked as human reviewed so automatic translation never overwrites them. Identify each string by original_id from list-string-translations, or by its exact original text. Purges the page cache of post_id (or the whole site without it) unless clear_cache is false.', [ self::class, 'save_string_translations' ], [ CloseHub_TranslatePress::class, 'can_translate' ], false, true, [
+			'language'     => [ 'type' => 'string', 'description' => 'Translation language code, e.g. "en_GB".' ],
+			'translations' => [ 'type' => 'array', 'description' => 'Up to 500 items.', 'items' => [ 'type' => 'object', 'properties' => [
+				'original_id' => [ 'type' => 'integer' ],
+				'original'    => [ 'type' => 'string', 'description' => 'Exact original text, when original_id is not known.' ],
+				'translated'  => [ 'type' => 'string' ],
+			], 'required' => [ 'translated' ] ] ],
+			'post_id'      => [ 'type' => 'integer', 'description' => 'Post whose page cache to purge.' ],
+			'clear_cache'  => [ 'type' => 'boolean', 'default' => true ],
+		], [ 'language', 'translations' ] );
 	}
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
@@ -65,16 +91,59 @@ class CloseHub_Language_Abilities {
 		return $post && $type && current_user_can( 'edit_post', $post->ID ) && current_user_can( $type->cap->create_posts ?? 'edit_posts' );
 	}
 
+	/** TranslatePress only takes over when WPML is not active; with both active WPML wins. */
+	private static function use_translatepress(): bool {
+		return CloseHub_TranslatePress::selected();
+	}
+
 	public static function list_languages( $input = null ): array|WP_Error {
-		return CloseHub_WPML::languages( ! empty( $input['include_available'] ) );
+		$include_available = ! empty( $input['include_available'] );
+		return self::use_translatepress() ? CloseHub_TranslatePress::languages( $include_available ) : CloseHub_WPML::languages( $include_available );
 	}
 
 	public static function add_language( $input ): array|WP_Error {
+		if ( self::use_translatepress() ) {
+			$result = CloseHub_TranslatePress::add_language( (string) ( $input['language'] ?? '' ), ! isset( $input['publish'] ) || ! empty( $input['publish'] ) );
+			// A new language adds URLs and a language switcher to every page, so purge the page cache (opt out with clear_cache=false).
+			if ( ! is_wp_error( $result ) && ! empty( $result['added'] ) && ( $input['clear_cache'] ?? true ) ) {
+				$cache = CloseHub_Site_Abilities::clear_cache( [ 'scope' => 'all' ] );
+				$result['cache'] = is_wp_error( $cache ) ? [ 'cleared' => false, 'reason' => $cache->get_error_message() ] : $cache;
+			}
+			return $result;
+		}
 		return CloseHub_WPML::add_language( (string) ( $input['language'] ?? '' ) );
 	}
 
 	public static function set_default_language( $input ): array|WP_Error {
+		if ( self::use_translatepress() ) {
+			return CloseHub_TranslatePress::set_default_language( (string) ( $input['language'] ?? '' ) );
+		}
 		return CloseHub_WPML::set_default_language( (string) ( $input['language'] ?? '' ) );
+	}
+
+	public static function list_string_translations( $input ): array|WP_Error {
+		$input = is_array( $input ) ? $input : [];
+		return CloseHub_TranslatePress::strings( [
+			'post_id'      => absint( $input['post_id'] ?? 0 ),
+			'search'       => sanitize_text_field( (string) ( $input['search'] ?? '' ) ),
+			'languages'    => array_map( 'sanitize_text_field', (array) ( $input['languages'] ?? [] ) ),
+			'only_missing' => ! isset( $input['only_missing'] ) || ! empty( $input['only_missing'] ),
+			'render'       => ! empty( $input['render'] ),
+			'page'         => absint( $input['page'] ?? 1 ),
+			'per_page'     => absint( $input['per_page'] ?? 200 ),
+		] );
+	}
+
+	public static function save_string_translations( $input ): array|WP_Error {
+		$input   = is_array( $input ) ? $input : [];
+		$post_id = absint( $input['post_id'] ?? 0 );
+		$result  = CloseHub_TranslatePress::save_strings( sanitize_text_field( (string) ( $input['language'] ?? '' ) ), array_values( array_filter( (array) ( $input['translations'] ?? [] ), 'is_array' ) ) );
+		if ( is_wp_error( $result ) || ! $result['saved'] || ! ( $input['clear_cache'] ?? true ) ) {
+			return $result;
+		}
+		$cache           = CloseHub_Site_Abilities::clear_cache( $post_id ? [ 'scope' => 'posts', 'post_ids' => [ $post_id ] ] : [ 'scope' => 'all' ] );
+		$result['cache'] = is_wp_error( $cache ) ? [ 'cleared' => false, 'reason' => $cache->get_error_message() ] : $cache;
+		return $result;
 	}
 
 	public static function duplicate_post( $input ): array|WP_Error {

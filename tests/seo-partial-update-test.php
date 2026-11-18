@@ -5,6 +5,7 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ . '/' );
 define( 'RANK_MATH_VERSION', '1' );
 define( 'WPSEO_VERSION', '1' );
+define( 'SEOPRESS_VERSION', '1' );
 
 class WP_Error {
 	public function __construct( public string $code = '', public string $message = '', public array $data = [] ) {}
@@ -37,11 +38,12 @@ $meta = static fn( string $key ): string => $GLOBALS['closehub_test_meta'][7][ $
 $GLOBALS['closehub_test_meta'][7] = [
 	'rank_math_title' => 'Old title', 'rank_math_description' => 'Old description', 'rank_math_focus_keyword' => 'old keyword',
 	'_yoast_wpseo_title' => 'Old title', '_yoast_wpseo_metadesc' => 'Old description', '_yoast_wpseo_focuskw' => 'old keyword',
+	'_seopress_titles_title' => 'Old title', '_seopress_titles_desc' => 'Old description', '_seopress_analysis_target_kw' => 'old keyword',
 ];
 
 if ( true !== $save( [ 'seo_title' => 'New title' ] ) ) { $fail( 'Saving a single SEO field must succeed.' ); }
-if ( 'New title' !== $meta( 'rank_math_title' ) || 'New title' !== $meta( '_yoast_wpseo_title' ) ) { $fail( 'The sent title must be written for every active SEO plugin.' ); }
-foreach ( [ 'rank_math_description' => 'Old description', 'rank_math_focus_keyword' => 'old keyword', '_yoast_wpseo_metadesc' => 'Old description', '_yoast_wpseo_focuskw' => 'old keyword' ] as $key => $expected ) {
+if ( 'New title' !== $meta( 'rank_math_title' ) || 'New title' !== $meta( '_yoast_wpseo_title' ) || 'New title' !== $meta( '_seopress_titles_title' ) ) { $fail( 'The sent title must be written for every active SEO plugin.' ); }
+foreach ( [ 'rank_math_description' => 'Old description', 'rank_math_focus_keyword' => 'old keyword', '_yoast_wpseo_metadesc' => 'Old description', '_yoast_wpseo_focuskw' => 'old keyword', '_seopress_titles_desc' => 'Old description', '_seopress_analysis_target_kw' => 'old keyword' ] as $key => $expected ) {
 	if ( $expected !== $meta( $key ) ) { $fail( "Updating only the title must leave $key untouched." ); }
 }
 

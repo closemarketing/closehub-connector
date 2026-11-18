@@ -2,6 +2,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/class-translatepress.php';
+
 class CloseHub_Content_Abilities {
 	private const MCP_TOOL_ABILITIES = [
 		'closehub/list-posts',
@@ -143,7 +145,7 @@ class CloseHub_Content_Abilities {
 		if ( ! empty( $input['language'] ) ) { $args['lang'] = sanitize_key( $input['language'] ); }
 		// Validate before switching WPML's language, so an early return never leaves it switched.
 		$missing = sanitize_key( $input['missing_translation'] ?? '' );
-		if ( $missing && ! has_filter( 'wpml_active_languages' ) ) { return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to filter by missing_translation.', [ 'status' => 400 ] ); }
+		if ( $missing && ! has_filter( 'wpml_active_languages' ) ) { return CloseHub_WPML::unavailable( 'filter by missing_translation' ); }
 		$previous_language = null;
 		if ( ! empty( $input['language'] ) && has_filter( 'wpml_current_language' ) ) {
 			$previous_language = apply_filters( 'wpml_current_language', null );
@@ -507,7 +509,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	private static function post_data( WP_Post $post, bool $full = false ): array {
-		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + ( is_post_type_hierarchical( $post->post_type ) ? [ 'parent_id' => (int) $post->post_parent ] : [] ) + CloseHub_WPML::details( $post->ID );
+		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + ( is_post_type_hierarchical( $post->post_type ) ? [ 'parent_id' => (int) $post->post_parent ] : [] ) + CloseHub_WPML::details( $post->ID ) + CloseHub_TranslatePress::details( $post->ID );
 		$translations = CloseHub_WPML::translations( $post->ID );
 		if ( $translations ) { $data['translations'] = $translations; }
 		if ( $full ) {

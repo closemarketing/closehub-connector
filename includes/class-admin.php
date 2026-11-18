@@ -8,6 +8,7 @@ class CloseHub_Admin {
 		[ 'POST', '/closehub/v1/posts' ],
 		[ 'PUT', '/closehub/v1/posts/{id}' ],
 		[ 'GET', '/closehub/v1/woocommerce/orders' ],
+		[ 'GET', '/closehub/v1/woocommerce/store-stats' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}' ],
 		[ 'GET', '/closehub/v1/gravity-forms/forms/{id}/entries' ],

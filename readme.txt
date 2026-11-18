@@ -25,6 +25,10 @@ It also exposes content abilities through the WordPress MCP Adapter. MCP clients
 
 When WPML is active, create-post and `POST /closehub/v1/posts` also accept `language` and an optional `translation_of` source post ID. The connector assigns the new post to the requested language and joins it to the source post's translation group. List/get/create responses include the language and translation-group details. Existing posts retain their language on update.
 
+When TranslatePress is active instead, the language abilities (`list-languages`, `add-language`, `set-default-language`) manage its languages, and `get-post`/`list-posts`/`create-post` responses return `language` (the default language the content is written in) and `language_urls` with the URL of a published post in every published language. TranslatePress translates one post into every language, so `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` answer with `closehub_translatepress_unsupported`. If both plugins are active WPML is used.
+
+With TranslatePress, `closehub/list-string-translations` lists the strings of a post (or every string containing `search`) with their translation and status per language, and `closehub/save-string-translations` saves translations for one language as human reviewed, so an MCP client can translate content itself instead of spending automatic translation quota.
+
 For WooCommerce, MCP clients with the `manage_woocommerce` capability can retrieve an order summary for a date range, including order count, total sales, average order value, and matching orders.
 
 It also exposes a set of "site" abilities for the CLOSE web go-live checklist — configuration steps that used to be manual or wp-cli only. Each requires the WordPress capability noted below.
@@ -49,8 +53,8 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `closehub/create-site-user` (`create_users`, plus `promote_users` when `role` is `administrator`) — Create a WordPress user for the site's client. `role` defaults to `editor`; `username` defaults to the local part of `email` when omitted. Example: `{ "email": "client@example.com", "role": "editor" }`.
 * `closehub/link-translations` (`edit_post` on both posts) — Link two existing posts as WPML translations without creating or editing content. `post_id` joins the translation group of `translation_of` (the original) in `language`. Rejects a language mismatch, different post types, a non-translatable post type, a `translation_of` that is itself a translation, and an existing translation in that language (`closehub_translation_conflict`) unless `force: true`, which detaches it into its own group. Purges the cache of every post in the affected groups unless `clear_cache: false`. Example: `{ "post_id": 5789, "translation_of": 4732, "language": "en" }`.
 * `closehub/unlink-translation` (`edit_post`) — Move a translation into a translation group of its own. The original post of a group cannot be unlinked while it has translations.
-* `closehub/list-languages` (`edit_posts`) — List the active WPML languages and the default one; `include_available: true` also lists supported languages that can still be added.
-* `closehub/add-language` (`manage_options`) — Activate a WPML-supported language by code, e.g. `{ "language": "fr" }`. Existing content is not changed.
+* `closehub/list-languages` (`edit_posts`) — List the active WPML or TranslatePress languages and the default one; `include_available: true` also lists supported languages that can still be added. With TranslatePress each language also reports `published` and its `url_slug`, and codes are locales such as `fr_FR`.
+* `closehub/add-language` (`manage_options`) — Activate a WPML-supported language by code, e.g. `{ "language": "fr" }`, or add a language to translate into with TranslatePress, e.g. `{ "language": "fr_FR" }` (`publish: false` keeps it hidden from visitors; the page cache is purged unless `clear_cache: false`). Existing content is not changed.
 * `closehub/set-default-language` (`manage_options`) — Make an active language the site default.
 * `closehub/duplicate-post` (`edit_post` + create capability) — Copy an original post into one or more other languages as drafts, using WPML's own duplication. Each copy is linked to the original by default; `link: false` creates independent, unlinked copies. Example: `{ "post_id": 42, "languages": [ "en", "fr" ] }`.
 * `closehub/create-post` with `language` creates new content in that language; add `translation_of` to link it as a translation of an existing post, or leave it out to keep it unlinked.
@@ -73,6 +77,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math, Yoast or SEOPress), featured image, categories, and WPML `language`/`translation_of` when WPML is active
 * `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
+* `GET /closehub/v1/woocommerce/store-stats` — best sellers, best customers, new customers, buying hours and unpaid orders (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
 * `GET /closehub/v1/gravity-forms/forms/{id}/entries` — count form entries by date range
@@ -137,6 +142,10 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 == Changelog ==
 
 = Unreleased =
+* Added TranslatePress support: `list-languages` and `add-language` manage its languages (including whether each is published and its URL slug), `set-default-language` explains that TranslatePress cannot change its default language without orphaning translations, and post responses include `language` and `language_urls` (the URL of a published post in every published language). Adding a language purges the page cache.
+* Added `closehub/list-string-translations` and `closehub/save-string-translations` (TranslatePress, `manage_options` or the `trp_translating_capability` filter): list a post's strings or search site-wide strings with their translation per language (`render: true` renders the post in each language first, so TranslatePress registers its strings, and records the strings it parsed on the post: needed with themes such as Divi, where TranslatePress does not link content strings to the post), then save translations by `original_id` or exact original text as human reviewed. The page cache of `post_id` (or the whole site) is purged after saving.
+* With TranslatePress active, `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` now answer `closehub_translatepress_unsupported` instead of asking for WPML. WPML is used when both plugins are active.
+* Added the `closehub/list-theme-patterns` and `closehub/get-theme-pattern` MCP abilities: list the block patterns of the active theme, core, plugins and synced patterns as metadata only (optional `category` and `search`), then fetch the content of one by `slug` or synced `id`, so a client can build a landing page from existing patterns and save it as a draft with `create-post`. Both require `edit_posts`.
 * Added LiteSpeed Cache support to the `closehub/clear-cache` MCP ability, using LiteSpeed's public `litespeed_purge_all` / `litespeed_purge_post` actions. WP Rocket still takes precedence when both are active.
 * Added SEOPress support for SEO title, meta description, and target keyword on post create/update and read-back, and for the `closehub/set-post-noindex` MCP ability.
 

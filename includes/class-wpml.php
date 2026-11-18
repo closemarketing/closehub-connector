@@ -2,14 +2,24 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/class-translatepress.php';
+
 /** Optional WPML bridge. It has no effect when WPML is not active. */
 class CloseHub_WPML {
+	/** WPML-only operation attempted without WPML. $action completes "WPML must be active to ...". */
+	public static function unavailable( string $action ): WP_Error {
+		if ( CloseHub_TranslatePress::active() ) {
+			return CloseHub_TranslatePress::unsupported( $action );
+		}
+		return new WP_Error( 'closehub_wpml_unavailable', sprintf( 'WPML must be active to %s.', $action ), [ 'status' => 400 ] );
+	}
+
 	public static function validate( string $language, int $translation_of = 0 ): string|WP_Error {
 		if ( '' === $language && ! $translation_of ) {
 			return '';
 		}
 		if ( ! has_filter( 'wpml_active_languages' ) ) {
-			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to set a content language.', [ 'status' => 400 ] );
+			return self::unavailable( 'set a content language' );
 		}
 		$languages = self::active_languages();
 		if ( '' === $language || ! isset( $languages[ $language ] ) ) {
@@ -169,6 +179,9 @@ class CloseHub_WPML {
 	 * Note: this writes icl_translations only. It does not create a WPML Translation Management status record.
 	 */
 	public static function link( int $post_id, int $translation_of, string $language, bool $force = false, bool $dry_run = false ): array|WP_Error {
+		if ( ! has_filter( 'wpml_active_languages' ) ) {
+			return self::unavailable( 'link translations' );
+		}
 		$language = $language ? self::validate( $language, $translation_of ) : new WP_Error( 'closehub_invalid_language', 'language is required to link translations.', [ 'status' => 400 ] );
 		if ( is_wp_error( $language ) ) {
 			return $language;
@@ -319,7 +332,7 @@ class CloseHub_WPML {
 			return new WP_Error( 'closehub_post_not_found', 'Post not found.', [ 'status' => 404 ] );
 		}
 		if ( ! has_filter( 'wpml_element_language_details' ) ) {
-			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to unlink translations.', [ 'status' => 400 ] );
+			return self::unavailable( 'unlink translations' );
 		}
 		$details = self::raw_details( $post );
 		if ( ! $details || empty( $details->trid ) ) {
@@ -350,7 +363,7 @@ class CloseHub_WPML {
 	private static function sitepress(): mixed {
 		global $sitepress;
 		if ( ! is_object( $sitepress ) || ! has_filter( 'wpml_active_languages' ) ) {
-			return new WP_Error( 'closehub_wpml_unavailable', 'WPML must be active to manage languages.', [ 'status' => 400 ] );
+			return self::unavailable( 'manage languages' );
 		}
 		return $sitepress;
 	}
@@ -523,6 +536,9 @@ class CloseHub_WPML {
 	 * translation group of its own (no link to the original).
 	 */
 	public static function duplicate( int $post_id, string $language, bool $link = true ): array|WP_Error {
+		if ( ! has_filter( 'wpml_active_languages' ) ) {
+			return self::unavailable( 'duplicate posts into another language' );
+		}
 		$valid = self::validate( $language, $post_id );
 		if ( is_wp_error( $valid ) ) {
 			return $valid;

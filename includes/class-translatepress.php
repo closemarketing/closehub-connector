@@ -10,8 +10,37 @@ defined( 'ABSPATH' ) || exit;
  * the site languages and reports the URL each published language serves a post on.
  */
 class CloseHub_TranslatePress {
+	/**
+	 * Whether TranslatePress runs on the current site. Its class is loaded for the whole request, so after
+	 * CloseHub_Network switches to another site of a network, also require the plugin to be active there.
+	 */
 	public static function active(): bool {
-		return class_exists( 'TRP_Translate_Press' );
+		return class_exists( 'TRP_Translate_Press' ) && ( ! self::switched() || self::plugin_active_here( 'translatepress-multilingual' ) );
+	}
+
+	/** Whether WPML runs on the current site; its filters stay registered after switch_to_blog() too. */
+	public static function wpml_active(): bool {
+		return has_filter( 'wpml_active_languages' ) && ( ! self::switched() || self::plugin_active_here( 'sitepress-multilingual-cms' ) );
+	}
+
+	/** The one place that picks the backend: TranslatePress only when it is active here and WPML is not (WPML wins). */
+	public static function selected(): bool {
+		return self::active() && ! self::wpml_active();
+	}
+
+	private static function switched(): bool {
+		return function_exists( 'ms_is_switched' ) && ms_is_switched();
+	}
+
+	/** Whether a plugin folder is active on the current (possibly switched-to) site or network-wide. */
+	private static function plugin_active_here( string $folder ): bool {
+		$active = array_merge( (array) get_option( 'active_plugins', [] ), array_keys( (array) get_site_option( 'active_sitewide_plugins', [] ) ) );
+		foreach ( $active as $basename ) {
+			if ( str_starts_with( (string) $basename, $folder . '/' ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Why a WPML-style operation cannot run on TranslatePress. $action completes "it cannot ...". */
@@ -170,7 +199,7 @@ class CloseHub_TranslatePress {
 	 * "language" is the language the content is written in, the default one. Only published posts get URLs.
 	 */
 	public static function details( int $post_id ): array {
-		if ( ! self::active() ) {
+		if ( ! self::selected() ) {
 			return [];
 		}
 		$post = get_post( $post_id );
@@ -183,8 +212,10 @@ class CloseHub_TranslatePress {
 	}
 
 	/**
-	 * TranslatePress serves a language under /{slug}/ after the home URL. The default language has no prefix
-	 * unless "add subdirectory to default language" is on.
+	 * The URL of $permalink in each published language. TranslatePress' own URL converter is used when possible, so
+	 * translated slugs and its URL filters apply. After switch_to_blog() its in-memory settings belong to another
+	 * site, so the URL is then built from this site's settings: /{slug}/ after the home URL (the default language
+	 * has no prefix unless "add subdirectory to default language" is on), keeping the original post slug.
 	 *
 	 * @return array<string, string> language code => URL
 	 */
@@ -193,12 +224,17 @@ class CloseHub_TranslatePress {
 		if ( '' === $permalink || 0 !== strpos( $permalink, $home ) ) {
 			return [];
 		}
+		$converter = self::switched() ? null : TRP_Translate_Press::get_trp_instance()->get_component( 'url_converter' );
 		$rest      = substr( $permalink, strlen( $home ) );
 		$default   = self::default_language();
 		$prefix_it = 'yes' === ( self::settings()['add-subdirectory-to-default-language'] ?? 'no' );
 		$urls      = [];
 		foreach ( self::published_codes() as $code ) {
-			$urls[ $code ] = $code === $default && ! $prefix_it ? $permalink : $home . self::slug( $code ) . '/' . $rest;
+			$url = is_object( $converter ) && method_exists( $converter, 'get_url_for_language' ) ? str_replace( '#TRPLINKPROCESSED', '', (string) $converter->get_url_for_language( $code, $permalink, '' ) ) : '';
+			if ( '' === $url || 0 !== strpos( $url, $home ) ) {
+				$url = $code === $default && ! $prefix_it ? $permalink : $home . self::slug( $code ) . '/' . $rest;
+			}
+			$urls[ $code ] = $url;
 		}
 		return $urls;
 	}

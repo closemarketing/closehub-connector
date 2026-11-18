@@ -93,7 +93,7 @@ class CloseHub_Language_Abilities {
 
 	/** TranslatePress only takes over when WPML is not active; with both active WPML wins. */
 	private static function use_translatepress(): bool {
-		return ! has_filter( 'wpml_active_languages' ) && CloseHub_TranslatePress::active();
+		return CloseHub_TranslatePress::selected();
 	}
 
 	public static function list_languages( $input = null ): array|WP_Error {

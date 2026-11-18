@@ -97,9 +97,11 @@ class Fake_WPDB {
 $wpdb = new Fake_WPDB();
 
 function get_option( string $name, mixed $default = false ): mixed {
+	if ( 'active_plugins' === $name ) { return [ 'translatepress-multilingual/index.php' ]; }
 	return 'trp_settings' === $name ? [ 'default-language' => 'es_ES', 'translation-languages' => [ 'es_ES', 'fr_FR', 'de_DE' ], 'publish-languages' => [ 'es_ES', 'fr_FR', 'de_DE' ], 'url-slugs' => [ 'es_ES' => 'es', 'fr_FR' => 'fr', 'de_DE' => 'de' ] ] : $default;
 }
 function get_locale(): string { return 'es_ES'; }
+function get_site_option( string $name, mixed $default = false ): mixed { return []; }
 function get_post( int $id ): ?WP_Post { return in_array( $id, [ 10, 11 ], true ) ? new WP_Post( $id ) : null; }
 function absint( mixed $v ): int { return abs( (int) $v ); }
 function is_wp_error( mixed $v ): bool { return $v instanceof WP_Error; }

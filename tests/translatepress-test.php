@@ -34,12 +34,20 @@ class Fake_TRP_Languages {
 class Fake_TRP_Settings {
 	public function register_setting(): void { $GLOBALS['registered']++; $GLOBALS['has_sanitizer'] = true; }
 }
+class Fake_TRP_Url_Converter {
+	// Like TranslatePress with translated slugs: only es_ES has one for /about/.
+	public function get_url_for_language( string $code, string $url, string $processed ): string {
+		return 'es_ES' === $code ? str_replace( '/about/', '/es/acerca/', $url ) . '#TRPLINKPROCESSED' : '';
+	}
+}
 class TRP_Translate_Press {
 	public static function get_trp_instance(): self { return new self(); }
-	public function get_component( string $name ): object { return 'languages' === $name ? new Fake_TRP_Languages() : new Fake_TRP_Settings(); }
+	public function get_component( string $name ): object {
+		return match ( $name ) { 'languages' => new Fake_TRP_Languages(), 'url_converter' => $GLOBALS['converter'] ?? new stdClass(), default => new Fake_TRP_Settings() };
+	}
 }
 
-function get_option( string $name, mixed $default = false ): mixed { return $GLOBALS['options'][ $name ] ?? $default; }
+function get_option( string $name, mixed $default = false ): mixed { return 'active_plugins' === $name ? $GLOBALS['site_plugins'] : ( $GLOBALS['options'][ $name ] ?? $default ); }
 function update_option( string $name, mixed $value ): bool {
 	$GLOBALS['updates']++;
 	if ( 'trp_settings' === $name ) {
@@ -54,6 +62,8 @@ function get_locale(): string { return 'en_US'; }
 function sanitize_text_field( string $value ): string { return trim( $value ); }
 function sanitize_title( string $value ): string { return strtolower( preg_replace( '/[^A-Za-z0-9_-]+/', '-', $value ) ); }
 function ms_is_switched(): bool { return $GLOBALS['switched']; }
+$GLOBALS['site_plugins'] = [ 'translatepress-multilingual/index.php' ];
+function get_site_option( string $name, mixed $default = false ): mixed { return []; }
 function home_url( string $path = '' ): string { return 'https://example.test' . $path; }
 function get_post( int $id ): ?WP_Post { return $GLOBALS['posts'][ $id ] ?? null; }
 function get_permalink( WP_Post $post ): string { return $GLOBALS['permalinks'][ $post->ID ]; }
@@ -142,6 +152,30 @@ $GLOBALS['options']['trp_settings']['add-subdirectory-to-default-language'] = 'y
 check( 'https://example.test/en/about/' === CloseHub_TranslatePress::details( 10 )['language_urls']['en_US'], 'The default language is prefixed when TranslatePress is set to do so.' );
 $GLOBALS['permalinks'][10] = 'https://other.test/about/';
 check( [ 'language' => 'en_US' ] === CloseHub_TranslatePress::details( 10 ), 'A permalink outside the home URL gets no language URLs.' );
+
+// TranslatePress' converter is used for translated slugs; languages it cannot convert fall back to the slug prefix.
+$GLOBALS['permalinks'][10] = 'https://example.test/about/';
+$GLOBALS['options']['trp_settings']['add-subdirectory-to-default-language'] = 'no';
+$GLOBALS['converter'] = new Fake_TRP_Url_Converter();
+$urls = CloseHub_TranslatePress::details( 10 )['language_urls'];
+check( 'https://example.test/es/acerca/' === $urls['es_ES'], 'Translated slugs come from TranslatePress\' converter, without its processed marker.' );
+check( 'https://example.test/fr/about/' === $urls['fr_FR'], 'A language the converter returns nothing for falls back to the slug prefix.' );
+$GLOBALS['switched'] = true;
+check( 'https://example.test/es/about/' === CloseHub_TranslatePress::details( 10 )['language_urls']['es_ES'], 'After switch_to_blog() the converter (another site\'s settings) is not used.' );
+$GLOBALS['switched'] = false;
+unset( $GLOBALS['converter'] );
+
+// The backend is picked per site, and WPML wins.
+$GLOBALS['wpml'] = true;
+check( false === CloseHub_TranslatePress::selected() && [] === CloseHub_TranslatePress::details( 10 ), 'With WPML active, TranslatePress details are not merged into post data.' );
+$GLOBALS['switched'] = true;
+$GLOBALS['site_plugins'] = [ 'translatepress-multilingual/index.php' ];
+check( true === CloseHub_TranslatePress::selected(), 'On a switched site without WPML, a WPML filter left by the first site does not win.' );
+$GLOBALS['site_plugins'] = [ 'sitepress-multilingual-cms/sitepress.php' ];
+check( false === CloseHub_TranslatePress::active(), 'On a switched site where TranslatePress is inactive, it is not used.' );
+$GLOBALS['site_plugins'] = [ 'translatepress-multilingual/index.php' ];
+$GLOBALS['switched'] = false;
+$GLOBALS['wpml'] = false;
 
 // WPML-only operations explain why they do not apply.
 $link = CloseHub_WPML::link( 10, 12, 'es_ES' );

@@ -77,6 +77,7 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 * `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math or Yoast), featured image, categories, and WPML `language`/`translation_of` when WPML is active
 * `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
+* `GET /closehub/v1/woocommerce/store-stats` — best sellers, best customers, new customers, buying hours and unpaid orders (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
 * `GET /closehub/v1/gravity-forms/forms/{id}` — get form details
 * `GET /closehub/v1/gravity-forms/forms/{id}/entries` — count form entries by date range
@@ -144,6 +145,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 * Added TranslatePress support: `list-languages` and `add-language` manage its languages (including whether each is published and its URL slug), `set-default-language` explains that TranslatePress cannot change its default language without orphaning translations, and post responses include `language` and `language_urls` (the URL of a published post in every published language). Adding a language purges the page cache.
 * Added `closehub/list-string-translations` and `closehub/save-string-translations` (TranslatePress, `manage_options` or the `trp_translating_capability` filter): list a post's strings or search site-wide strings with their translation per language (`render: true` renders the post in each language first, so TranslatePress registers its strings, and records the strings it parsed on the post: needed with themes such as Divi, where TranslatePress does not link content strings to the post), then save translations by `original_id` or exact original text as human reviewed. The page cache of `post_id` (or the whole site) is purged after saving.
 * With TranslatePress active, `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` now answer `closehub_translatepress_unsupported` instead of asking for WPML. WPML is used when both plugins are active.
+* Added the `closehub/list-theme-patterns` and `closehub/get-theme-pattern` MCP abilities: list the block patterns of the active theme, core, plugins and synced patterns as metadata only (optional `category` and `search`), then fetch the content of one by `slug` or synced `id`, so a client can build a landing page from existing patterns and save it as a draft with `create-post`. Both require `edit_posts`.
 
 = 1.3.1 =
 * Added MCP abilities to install or replace a plugin or theme from a zip (`install-plugin-zip`, `install-theme-zip`), with single-use deploy tickets for large uploads (`create-deploy-ticket`), `get-installed-version` and `rollback-package` to restore the backup taken before a replacement.

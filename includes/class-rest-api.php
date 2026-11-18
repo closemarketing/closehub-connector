@@ -818,7 +818,10 @@ class CloseHub_REST_API {
 		$paid   = [ 'wc-completed', 'wc-processing' ];
 
 		$rows = static function ( array $statuses ) use ( $after, $before ): array {
+			// `type` matters: by default wc_get_orders() also returns refunds (negative
+			// totals, no billing data), which would be a fatal error below.
 			$orders = wc_get_orders( [
+				'type'        => 'shop_order',
 				'status'      => $statuses,
 				'date_after'  => $after,
 				'date_before' => $before,
@@ -852,6 +855,7 @@ class CloseHub_REST_API {
 		};
 
 		$bought_before = static fn( string $email ): bool => (bool) wc_get_orders( [
+			'type'          => 'shop_order',
 			'status'        => $paid,
 			'billing_email' => $email,
 			'date_before'   => $after,

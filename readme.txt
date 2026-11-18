@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.2
 Requires PHP: 8.1
-Stable tag: 1.3.1
-Version: 1.3.0
+Stable tag: 1.3.2
+Version: 1.3.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -141,13 +141,15 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= Unreleased =
+= 1.3.2 =
+* Added `GET /closehub/v1/woocommerce/store-stats`: best sellers, best customers (display name only, never the e-mail), new customers, buying hours by weekday and unpaid orders for a date range (requires WooCommerce).
 * Added TranslatePress support: `list-languages` and `add-language` manage its languages (including whether each is published and its URL slug), `set-default-language` explains that TranslatePress cannot change its default language without orphaning translations, and post responses include `language` and `language_urls` (the URL of a published post in every published language). Adding a language purges the page cache.
 * Added `closehub/list-string-translations` and `closehub/save-string-translations` (TranslatePress, `manage_options` or the `trp_translating_capability` filter): list a post's strings or search site-wide strings with their translation per language (`render: true` renders the post in each language first, so TranslatePress registers its strings, and records the strings it parsed on the post: needed with themes such as Divi, where TranslatePress does not link content strings to the post), then save translations by `original_id` or exact original text as human reviewed. The page cache of `post_id` (or the whole site) is purged after saving.
 * With TranslatePress active, `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` now answer `closehub_translatepress_unsupported` instead of asking for WPML. WPML is used when both plugins are active.
 * Added the `closehub/list-theme-patterns` and `closehub/get-theme-pattern` MCP abilities: list the block patterns of the active theme, core, plugins and synced patterns as metadata only (optional `category` and `search`), then fetch the content of one by `slug` or synced `id`, so a client can build a landing page from existing patterns and save it as a draft with `create-post`. Both require `edit_posts`.
 * Added LiteSpeed Cache support to the `closehub/clear-cache` MCP ability, using LiteSpeed's public `litespeed_purge_all` / `litespeed_purge_post` actions. WP Rocket still takes precedence when both are active.
 * Added SEOPress support for SEO title, meta description, and target keyword on post create/update and read-back, and for the `closehub/set-post-noindex` MCP ability.
+* Tested up to WordPress 7.2.
 
 = 1.3.1 =
 * Added MCP abilities to install or replace a plugin or theme from a zip (`install-plugin-zip`, `install-theme-zip`), with single-use deploy tickets for large uploads (`create-deploy-ticket`), `get-installed-version` and `rollback-package` to restore the backup taken before a replacement.

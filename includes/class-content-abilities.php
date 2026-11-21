@@ -53,8 +53,8 @@ class CloseHub_Content_Abilities {
 			'missing_translation' => [ 'type' => 'string', 'description' => 'WPML language code. Only return posts whose translation group has no post in that language (requires WPML). Each post also returns its translations.' ],
 		] );
 		self::ability( 'closehub/get-post', 'Get post', 'Get one post, page, product, or other supported content item and its CloseHub-managed metadata.', [ self::class, 'get_post' ], [ self::class, 'can_edit_post' ], true, true, [ 'post_id' => [ 'type' => 'integer' ] ], [ 'post_id' ] );
-		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. Pass post_type to create a page, product, or other registered content type instead of a post. With WPML, pass language to create it in that language; add translation_of (the original post ID) to also link it as a translation of that post, or omit it to keep it unlinked. To copy an existing post into another language use duplicate-post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
-		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
+		self::ability( 'closehub/create-post', 'Create post', 'Create a post as a draft unless another valid status is supplied. To schedule it, send status=future and a future date (site local time, Y-m-d\\TH:i:s). Pass post_type to create a page, product, or other registered content type instead of a post. With WPML, pass language to create it in that language; add translation_of (the original post ID) to also link it as a translation of that post, or omit it to keep it unlinked. To copy an existing post into another language use duplicate-post.', [ self::class, 'create_post' ], [ self::class, 'can_create_post' ], false, false, self::post_fields( true ), [ 'title', 'content' ] );
+		self::ability( 'closehub/update-post', 'Update post', 'Update an existing post, page, product, or other supported content item and its CloseHub metadata. To schedule it, send status=future and a future date (site local time, Y-m-d\\TH:i:s); status=draft on a scheduled post unschedules it. The response returns the final status, date and date_gmt.', [ self::class, 'update_post' ], [ self::class, 'can_edit_post' ], false, false, self::post_fields( false ), [ 'post_id' ] );
 		self::ability( 'closehub/upload-media', 'Upload image', 'Upload one image to the Media Library. Use its returned URL as featured_image_url when creating or updating content.', [ self::class, 'upload_media' ], [ self::class, 'can_upload_media' ], false, false, [
 			'filename'    => [ 'type' => 'string' ],
 			'data_base64' => [ 'type' => 'string' ],
@@ -97,16 +97,20 @@ class CloseHub_Content_Abilities {
 	}
 
 	private static function post_fields( bool $creating ): array {
-		$fields = [ 'post_id' => [ 'type' => 'integer' ], 'title' => [ 'type' => 'string' ], 'content' => [ 'type' => 'string' ], 'excerpt' => [ 'type' => 'string' ], 'parent_id' => [ 'type' => 'integer', 'minimum' => 0, 'description' => 'Parent post ID for hierarchical post types such as page. Use 0 to move to the top level.' ], 'status' => [ 'type' => 'string', 'enum' => [ 'draft', 'publish', 'pending' ] ], 'categories' => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ], 'featured_image_url' => [ 'type' => 'string' ], 'seo_title' => [ 'type' => 'string' ], 'seo_description' => [ 'type' => 'string' ], 'seo_focus_keyword' => [ 'type' => 'string' ] ];
+		$fields = [ 'post_id' => [ 'type' => 'integer' ], 'title' => [ 'type' => 'string' ], 'content' => [ 'type' => 'string' ], 'excerpt' => [ 'type' => 'string' ], 'parent_id' => [ 'type' => 'integer', 'minimum' => 0, 'description' => 'Parent post ID for hierarchical post types such as page. Use 0 to move to the top level.' ], 'status' => [ 'type' => 'string', 'enum' => [ 'draft', 'publish', 'pending', 'future' ], 'description' => 'Post status. To schedule, send status=future and a future date in the site local time.' ], 'date' => [ 'type' => 'string', 'description' => 'Publish date in the site local time, format Y-m-d\\TH:i:s (e.g. 2026-12-22T09:00:00). To schedule, send status=future and a future date. Use status=draft on a scheduled post to unschedule it (the date is kept).' ], 'date_gmt' => [ 'type' => 'string', 'description' => 'Same date in UTC, format Y-m-d\\TH:i:s. If both date and date_gmt are sent, date_gmt wins.' ], 'categories' => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ], 'featured_image_url' => [ 'type' => 'string' ], 'seo_title' => [ 'type' => 'string' ], 'seo_description' => [ 'type' => 'string' ], 'seo_focus_keyword' => [ 'type' => 'string' ] ];
 		if ( $creating ) { $fields['status']['default'] = 'draft'; $fields['post_type'] = [ 'type' => 'string', 'default' => 'post' ]; $fields['language'] = [ 'type' => 'string' ]; $fields['translation_of'] = [ 'type' => 'integer' ]; unset( $fields['post_id'] ); }
 		return $fields;
 	}
 
 	public static function can_edit_posts( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'edit_posts' ); }
-	public static function can_create_post( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'create_posts' ) && ( 'publish' !== ( $input['status'] ?? 'draft' ) || self::type_cap( $input['post_type'] ?? 'post', 'publish_posts' ) ); }
+	public static function can_create_post( $input ): bool { return self::type_cap( $input['post_type'] ?? 'post', 'create_posts' ) && ( ! in_array( $input['status'] ?? 'draft', [ 'publish', 'future' ], true ) || self::type_cap( $input['post_type'] ?? 'post', 'publish_posts' ) ); }
 	public static function can_edit_post( $input ): bool {
 		$post_id = absint( $input['post_id'] ?? 0 );
-		return current_user_can( 'edit_post', $post_id ) && ( 'publish' !== ( $input['status'] ?? '' ) || self::type_cap( get_post_type( $post_id ) ?: 'post', 'publish_posts' ) );
+		$status  = $input['status'] ?? '';
+		// Moving the date of a post that is already scheduled or live is a publishing action too.
+		$current = ( isset( $input['date'] ) || isset( $input['date_gmt'] ) ) ? get_post_status( $post_id ) : '';
+		$needs   = in_array( $status, [ 'publish', 'future' ], true ) || in_array( $current, [ 'publish', 'future' ], true );
+		return current_user_can( 'edit_post', $post_id ) && ( ! $needs || self::type_cap( get_post_type( $post_id ) ?: 'post', 'publish_posts' ) );
 	}
 	public static function can_link_translations( $input ): bool {
 		$post_id        = absint( $input['post_id'] ?? 0 );
@@ -509,7 +513,7 @@ class CloseHub_Content_Abilities {
 	}
 
 	private static function post_data( WP_Post $post, bool $full = false ): array {
-		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date ] + ( is_post_type_hierarchical( $post->post_type ) ? [ 'parent_id' => (int) $post->post_parent ] : [] ) + CloseHub_WPML::details( $post->ID ) + CloseHub_TranslatePress::details( $post->ID );
+		$data = [ 'post_id' => $post->ID, 'post_type' => $post->post_type, 'title' => $post->post_title, 'status' => $post->post_status, 'url' => get_permalink( $post ), 'edit_url' => get_edit_post_link( $post->ID, 'raw' ), 'date' => $post->post_date, 'date_gmt' => '0000-00-00 00:00:00' === $post->post_date_gmt ? null : $post->post_date_gmt ] + ( is_post_type_hierarchical( $post->post_type ) ? [ 'parent_id' => (int) $post->post_parent ] : [] ) + CloseHub_WPML::details( $post->ID ) + CloseHub_TranslatePress::details( $post->ID );
 		$translations = CloseHub_WPML::translations( $post->ID );
 		if ( $translations ) { $data['translations'] = $translations; }
 		if ( $full ) {

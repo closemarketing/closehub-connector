@@ -47,8 +47,8 @@ All endpoints live under the `closehub/v1` namespace and require the `X-CloseHub
 | Method | Endpoint | Class method | Notes |
 |--------|----------|--------------|-------|
 | GET | `/ping` | `ping()` | Returns site name, URL, WP version, plugin version and `capabilities` (`seo_partial_update`: the SEO fields of `PUT /posts/{id}` are updated only when sent) |
-| POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status`, `categories`, `featured_image_url`, `seo_title`, `seo_description`, `seo_focus_keyword` |
-| PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create, all optional here; an omitted `seo_*` field keeps its stored value, an empty string clears it |
+| POST | `/posts` | `create_post()` | Creates a WP post; args: `title`, `content`, `excerpt`, `status` (`draft`/`publish`/`pending`/`future`), `date` (site local, `Y-m-d\TH:i:s`), `date_gmt` (UTC, wins over `date`), `categories`, `featured_image_url`, `seo_title`, `seo_description`, `seo_focus_keyword` |
+| PUT | `/posts/{id}` | `update_post()` | Updates a WP post; same optional args as create (including `date`/`date_gmt`), all optional here; an omitted `seo_*` field keeps its stored value, an empty string clears it |
 | GET | `/woocommerce/orders` | `get_woocommerce_orders()` | Returns order count, total sales, average order; args: `after`, `before`, `status` |
 | GET | `/woocommerce/store-stats` | `get_woocommerce_store_stats()` | Best sellers, best customers (display name only, never the e-mail), new customers, orders by weekday × hour slot and unpaid orders (pending/failed/draft checkout) of a period; args: `after`, `before`, `top` (1–50, default 10). The maths lives in `CloseHub_WooCommerce_Stats` |
 | GET | `/gravity-forms/forms` | `list_forms()` | Lists all forms with entry count |

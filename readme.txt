@@ -23,6 +23,8 @@ It also exposes content abilities through the WordPress MCP Adapter. MCP clients
 
 **Claude Team:** In Claude, add a custom connector with the **MCP server URL** from Settings → CloseHub, choose **No sign-in**, and add a request header named `authorization` with the value `Bearer <your API key>`. The URL uses a `?rest_route=` query to help preserve the header when a server rewrite strips it from `/wp-json/` requests. Everyone sharing this connector has the WordPress permissions of the user who last generated the key. Regenerating the key disconnects CloseHub and every Claude user until updated. OAuth per-user sign-in remains available under **Advanced**.
 
+To schedule a post, send `status=future` and a future `date` in the site's local time (`Y-m-d\TH:i:s`, e.g. `2026-12-22T09:00:00`), or `date_gmt` for the same moment in UTC (it wins if both are sent) to `create-post` or `update-post`. The conversion uses the site's timezone, including daylight saving time. `status=publish` with a future date is scheduled by WordPress and the response includes a `notice`; `status=draft` on a scheduled post returns it to draft and keeps its date. Responses return the final `status`, `date` and `date_gmt` as stored, so a client can verify the schedule.
+
 When WPML is active, create-post and `POST /closehub/v1/posts` also accept `language` and an optional `translation_of` source post ID. The connector assigns the new post to the requested language and joins it to the source post's translation group. List/get/create responses include the language and translation-group details. Existing posts retain their language on update.
 
 When TranslatePress is active instead, the language abilities (`list-languages`, `add-language`, `set-default-language`) manage its languages, and `get-post`/`list-posts`/`create-post` responses return `language` (the default language the content is written in) and `language_urls` with the URL of a published post in every published language. TranslatePress translates one post into every language, so `language`, `translation_of`, `link-translations`, `unlink-translation`, `duplicate-post` and `missing_translation` answer with `closehub_translatepress_unsupported`. If both plugins are active WPML is used.
@@ -74,8 +76,8 @@ It also exposes a set of "site" abilities for the CLOSE web go-live checklist �
 **Available endpoints:**
 
 * `GET /closehub/v1/ping` — verify the connection
-* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math, Yoast or SEOPress), featured image, categories, and WPML `language`/`translation_of` when WPML is active
-* `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, SEO metadata, featured image, or categories
+* `POST /closehub/v1/posts` — publish or draft a post (or another post type via `post_type`), including optional SEO metadata (Rank Math, Yoast or SEOPress), featured image, categories, scheduling (`status=future` with `date`/`date_gmt`), and WPML `language`/`translation_of` when WPML is active
+* `PUT /closehub/v1/posts/{id}` — update a post's (or other post type's) title, content, excerpt, status, publish date (`date`/`date_gmt`), SEO metadata, featured image, or categories
 * `GET /closehub/v1/woocommerce/orders` — fetch order data (requires WooCommerce)
 * `GET /closehub/v1/woocommerce/store-stats` — best sellers, best customers, new customers, buying hours and unpaid orders (requires WooCommerce)
 * `GET /closehub/v1/gravity-forms/forms` — list forms (requires Gravity Forms)
@@ -140,6 +142,9 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 2. Regenerate Key button with confirmation notice.
 
 == Changelog ==
+
+= Unreleased =
+* Added post scheduling to `closehub/create-post`, `closehub/update-post` and the `/closehub/v1/posts` endpoints: `status` accepts `future`, and the new `date` (site local time) and `date_gmt` (UTC, wins over `date`) take `Y-m-d\TH:i:s`. `status=future` without a date, or with a past one, returns an error; `status=publish` with a future date is left to WordPress, which schedules it, and the response says so; `status=draft` on a scheduled post unschedules it and keeps the date. Scheduling needs `publish_posts` (or the post type's equivalent), like publishing. Responses now return the final `status`, `date` and `date_gmt` read from the database; `get-post`/`list-posts` return `date_gmt`.
 
 = 1.3.2 =
 * Added `GET /closehub/v1/woocommerce/store-stats`: best sellers, best customers (display name only, never the e-mail), new customers, buying hours by weekday and unpaid orders for a date range (requires WooCommerce).

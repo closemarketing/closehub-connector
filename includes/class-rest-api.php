@@ -38,12 +38,14 @@ class CloseHub_REST_API {
 					'items'    => [ 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 					'default'  => [],
 				],
+				'date'     => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'description' => 'Publish date in the site local time, Y-m-d\\TH:i:s.' ],
+				'date_gmt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'description' => 'Publish date in UTC, Y-m-d\\TH:i:s. Wins over date.' ],
 				'status'  => [
 					'required'          => false,
 					'type'              => 'string',
 					'default'           => 'publish',
 					'sanitize_callback' => 'sanitize_text_field',
-					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
+					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending', 'future' ], true ),
 				],
 				'post_type' => [
 					'required'          => false,
@@ -80,11 +82,13 @@ class CloseHub_REST_API {
 					'type'     => 'array',
 					'items'    => [ 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ],
 				],
+				'date'     => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'description' => 'Publish date in the site local time, Y-m-d\\TH:i:s.' ],
+				'date_gmt' => [ 'required' => false, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'description' => 'Publish date in UTC, Y-m-d\\TH:i:s. Wins over date.' ],
 				'status'  => [
 					'required'          => false,
 					'type'              => 'string',
 					'sanitize_callback' => 'sanitize_text_field',
-					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending' ], true ),
+					'validate_callback' => static fn( $v ) => in_array( $v, [ 'publish', 'draft', 'pending', 'future' ], true ),
 				],
 			],
 		] );
@@ -398,6 +402,10 @@ class CloseHub_REST_API {
 		}
 
 		$requested_status = $request->get_param( 'status' );
+		$schedule         = $this->schedule_fields( $request, (string) $requested_status );
+		if ( is_wp_error( $schedule ) ) {
+			return $schedule;
+		}
 		$language         = (string) ( $request->get_param( 'language' ) ?? '' );
 		$translation_of   = absint( $request->get_param( 'translation_of' ) );
 		$language_error   = CloseHub_WPML::validate( $language, $translation_of );
@@ -417,7 +425,9 @@ class CloseHub_REST_API {
 		if ( null !== $parent_id ) {
 			$post_args['post_parent'] = $parent_id;
 		}
-		$post_id = wp_insert_post( $post_args, true );
+		// The date goes in with the draft: WordPress ignores it on drafts without edit_date.
+		$post_args = array_merge( $post_args, $schedule );
+		$post_id   = wp_insert_post( $post_args, true );
 
 		if ( is_wp_error( $post_id ) ) {
 			return $post_id;
@@ -443,7 +453,7 @@ class CloseHub_REST_API {
 			}
 		}
 
-		return $this->post_response( $post_id );
+		return $this->post_response( $post_id, (string) $requested_status );
 	}
 
 	/**
@@ -470,7 +480,12 @@ class CloseHub_REST_API {
 			return $parent_id;
 		}
 
-		$fields = [ 'ID' => $post_id ];
+		$schedule = $this->schedule_fields( $request, (string) $request->get_param( 'status' ), $post );
+		if ( is_wp_error( $schedule ) ) {
+			return $schedule;
+		}
+
+		$fields = [ 'ID' => $post_id ] + $schedule;
 		if ( null !== $parent_id ) {
 			$fields['post_parent'] = $parent_id;
 		}
@@ -486,6 +501,9 @@ class CloseHub_REST_API {
 		}
 
 		if ( count( $fields ) > 1 ) {
+			if ( isset( $fields['post_date'] ) && ! isset( $fields['post_status'] ) && 'future' === $post->post_status && $fields['post_date_gmt'] <= gmdate( 'Y-m-d H:i:s' ) ) {
+				return new WP_Error( 'closehub_schedule_date_not_future', 'A scheduled post needs a future date. Send status=publish to publish it now or status=draft to unschedule it.', [ 'status' => 400 ] );
+			}
 			$result = wp_update_post( $fields, true );
 			if ( is_wp_error( $result ) ) {
 				return $result;
@@ -497,7 +515,49 @@ class CloseHub_REST_API {
 			return $result;
 		}
 
-		return $this->post_response( $post_id );
+		return $this->post_response( $post_id, (string) $request->get_param( 'status' ) );
+	}
+
+	/**
+	 * Validate the optional date/date_gmt params and turn them into wp_insert_post()
+	 * fields. date_gmt wins over date. status=future needs a future date. Returns
+	 * an empty array when no date was sent, so existing calls behave as before.
+	 *
+	 * @return array<string, mixed>|WP_Error
+	 */
+	private function schedule_fields( WP_REST_Request $request, string $status, ?WP_Post $existing = null ): array|WP_Error {
+		$date     = (string) ( $request->get_param( 'date' ) ?? '' );
+		$date_gmt = (string) ( $request->get_param( 'date_gmt' ) ?? '' );
+		$given    = '' !== $date_gmt ? $date_gmt : $date;
+
+		if ( '' === $given ) {
+			if ( 'future' === $status && ! ( $existing && 'future' === $existing->post_status && '0000-00-00 00:00:00' !== $existing->post_date_gmt ) ) {
+				return new WP_Error( 'closehub_schedule_date_required', 'status=future requires a date (site local time, Y-m-d\TH:i:s) or date_gmt.', [ 'status' => 400 ] );
+			}
+			return [];
+		}
+
+		$parsed = DateTime::createFromFormat( 'Y-m-d\TH:i:s', $given, new DateTimeZone( 'UTC' ) );
+		$errors = DateTime::getLastErrors();
+		if ( ! $parsed || ( $errors && ( $errors['warning_count'] || $errors['error_count'] ) ) || $parsed->format( 'Y-m-d\TH:i:s' ) !== $given ) {
+			return new WP_Error( 'closehub_invalid_date', sprintf( 'Invalid %s. Use a real date in the format Y-m-d\TH:i:s, for example 2026-12-22T09:00:00.', '' !== $date_gmt ? 'date_gmt' : 'date' ), [ 'status' => 400 ] );
+		}
+
+		$wp_format = 'Y-m-d H:i:s';
+		$given_wp  = $parsed->format( $wp_format );
+		if ( '' !== $date_gmt ) {
+			$gmt   = $given_wp;
+			$local = get_date_from_gmt( $gmt, $wp_format );
+		} else {
+			$local = $given_wp;
+			$gmt   = get_gmt_from_date( $local, $wp_format );
+		}
+
+		if ( 'future' === $status && $gmt <= gmdate( $wp_format ) ) {
+			return new WP_Error( 'closehub_schedule_date_not_future', 'status=future needs a date in the future. Use status=publish to publish now.', [ 'status' => 400 ] );
+		}
+
+		return [ 'post_date' => $local, 'post_date_gmt' => $gmt, 'edit_date' => true ];
 	}
 
 	/**
@@ -569,8 +629,21 @@ class CloseHub_REST_API {
 		return $parent_id;
 	}
 
-	private function post_response( int $post_id ): array {
-		return [ 'id' => $post_id, 'link' => get_permalink( $post_id ), 'parent_id' => (int) wp_get_post_parent_id( $post_id ) ] + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id ) + CloseHub_TranslatePress::details( $post_id );
+	private function post_response( int $post_id, string $requested_status = '' ): array {
+		$post     = get_post( $post_id );
+		$response = [ 'id' => $post_id, 'link' => get_permalink( $post_id ), 'parent_id' => (int) wp_get_post_parent_id( $post_id ) ];
+		if ( $post ) {
+			// Read back from the database, not echoed from the input, so a schedule can be verified.
+			$response += [
+				'status'   => $post->post_status,
+				'date'     => $post->post_date,
+				'date_gmt' => '0000-00-00 00:00:00' === $post->post_date_gmt ? null : $post->post_date_gmt,
+			];
+			if ( 'publish' === $requested_status && 'future' === $post->post_status ) {
+				$response['notice'] = 'The date is in the future, so WordPress scheduled the post (status future) instead of publishing it.';
+			}
+		}
+		return $response + self::cms_metadata( $post_id ) + CloseHub_WPML::details( $post_id ) + CloseHub_TranslatePress::details( $post_id );
 	}
 
 	/**

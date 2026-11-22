@@ -4,8 +4,8 @@ Tags: api, integration, closehub, woocommerce, gravity-forms
 Requires at least: 6.4
 Tested up to: 7.2
 Requires PHP: 8.1
-Stable tag: 1.3.2
-Version: 1.3.2
+Stable tag: 1.3.3
+Version: 1.3.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -143,7 +143,7 @@ No. It integrates with those plugins using their public PHP APIs but is not deve
 
 == Changelog ==
 
-= Unreleased =
+= 1.3.3 =
 * Added post scheduling to `closehub/create-post`, `closehub/update-post` and the `/closehub/v1/posts` endpoints: `status` accepts `future`, and the new `date` (site local time) and `date_gmt` (UTC, wins over `date`) take `Y-m-d\TH:i:s`. `status=future` without a date, or with a past one, returns an error; `status=publish` with a future date is left to WordPress, which schedules it, and the response says so; `status=draft` on a scheduled post unschedules it and keeps the date. Scheduling needs `publish_posts` (or the post type's equivalent), like publishing. Responses now return the final `status`, `date` and `date_gmt` read from the database; `get-post`/`list-posts` return `date_gmt`.
 
 = 1.3.2 =

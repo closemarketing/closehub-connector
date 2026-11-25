@@ -27,6 +27,7 @@ class CloseHub_Site_Abilities {
 		'closehub/update-plugins-and-core',
 		'closehub/create-site-user',
 		'closehub/clear-cache',
+		'closehub/set-product-backorders',
 	];
 
 	public static function register(): void {
@@ -115,6 +116,11 @@ class CloseHub_Site_Abilities {
 		self::ability( 'closehub/clear-cache', 'Clear site cache', 'Purge the page cache of the active caching plugin (WP Rocket or LiteSpeed Cache). Can clear the whole site or only specific posts.', [ self::class, 'clear_cache' ], [ self::class, 'can_clear_cache' ], false, true, [
 			'scope' => [ 'type' => 'string', 'enum' => [ 'all', 'posts' ], 'default' => 'all' ], 'post_ids' => [ 'type' => 'array', 'items' => [ 'type' => 'integer' ] ], 'minify' => [ 'type' => 'boolean', 'default' => false ],
 		] );
+
+		self::ability( 'closehub/set-product-backorders', 'Set product backorders in bulk', 'Change only the backorders setting (no|notify|yes) of up to 500 WooCommerce products or variations. Optional sku is checked against the real SKU and mismatches are not touched. dry_run defaults to true: pass dry_run=false to save. Purges the cache of changed products afterwards.', [ self::class, 'set_product_backorders' ], [ self::class, 'can_edit_products' ], false, true, [
+			'items'   => [ 'type' => 'array', 'maxItems' => 500, 'items' => [ 'type' => 'object', 'properties' => [ 'id' => [ 'type' => 'integer' ], 'sku' => [ 'type' => 'string' ], 'backorders' => [ 'type' => 'string', 'enum' => [ 'no', 'notify', 'yes' ] ] ], 'required' => [ 'id', 'backorders' ] ] ],
+			'dry_run' => [ 'type' => 'boolean', 'default' => true ],
+		], [ 'items' ], true );
 	}
 
 	private static function ability( string $id, string $label, string $description, array $execute, array $permission, bool $readonly, bool $idempotent, array $properties, array $required = [], bool $destructive = false ): void {
@@ -143,6 +149,7 @@ class CloseHub_Site_Abilities {
 	public static function can_view_plugins(): bool { return current_user_can( 'activate_plugins' ); }
 	public static function can_update_site(): bool { return current_user_can( 'update_plugins' ) && current_user_can( 'update_core' ); }
 	/** WP Rocket registers rocket_purge_cache so non-admin roles can be allowed to purge; respect it alongside manage_options. */
+	public static function can_edit_products(): bool { return current_user_can( 'edit_products' ); }
 	public static function can_clear_cache(): bool { return current_user_can( 'rocket_purge_cache' ) || current_user_can( 'manage_options' ); }
 
 	/** A caller may only request the administrator role if they can promote users to it. */
@@ -665,6 +672,78 @@ class CloseHub_Site_Abilities {
 		}
 		if ( $minify ) {
 			$output['minify_cleared'] = ! empty( $result['minify_cleared'] );
+		}
+		return $output;
+	}
+
+	/**
+	 * Bulk-set only the backorders field of WooCommerce products/variations.
+	 * Never touches stock, price or any other field. dry_run defaults to true.
+	 */
+	public static function set_product_backorders( $input ): array|WP_Error {
+		$items = is_array( $input ) ? ( $input['items'] ?? null ) : null;
+		if ( ! is_array( $items ) || ! $items ) {
+			return new WP_Error( 'closehub_backorders_items_required', 'items must be a non-empty array.', [ 'status' => 400 ] );
+		}
+		if ( count( $items ) > 500 ) {
+			return new WP_Error( 'closehub_backorders_too_many', 'items accepts at most 500 elements.', [ 'status' => 400 ] );
+		}
+		if ( ! function_exists( 'wc_get_product' ) ) {
+			return new WP_Error( 'closehub_woocommerce_inactive', 'WooCommerce is not active.', [ 'status' => 503 ] );
+		}
+
+		$dry_run = ! array_key_exists( 'dry_run', $input ) || ! empty( $input['dry_run'] );
+		$results = [];
+		$counts  = [ 'changed' => 0, 'unchanged' => 0, 'would_change' => 0, 'error' => 0 ];
+		$purge   = [];
+
+		foreach ( $items as $item ) {
+			$item   = is_array( $item ) ? $item : [];
+			$id     = absint( $item['id'] ?? 0 );
+			$wanted = (string) ( $item['backorders'] ?? '' );
+			$row    = [ 'id' => $id, 'sku' => isset( $item['sku'] ) ? (string) $item['sku'] : '', 'before' => null, 'after' => null, 'status' => 'error' ];
+
+			if ( ! $id || ! in_array( $wanted, [ 'no', 'notify', 'yes' ], true ) ) {
+				$row['message'] = 'Each item needs a positive id and backorders of no, notify or yes.';
+			} else {
+				$product = wc_get_product( $id );
+				if ( ! $product ) {
+					$row['message'] = 'Product not found.';
+				} elseif ( isset( $item['sku'] ) && '' !== (string) $item['sku'] && (string) $item['sku'] !== (string) $product->get_sku() ) {
+					$row['message'] = sprintf( 'SKU mismatch: expected "%s", product has "%s".', (string) $item['sku'], (string) $product->get_sku() );
+					$row['before']  = (string) $product->get_backorders();
+				} else {
+					$row['sku']    = (string) $product->get_sku();
+					$before        = (string) $product->get_backorders();
+					$row['before'] = $before;
+					if ( $before === $wanted ) {
+						$row['after']  = $before;
+						$row['status'] = 'unchanged';
+					} elseif ( $dry_run ) {
+						$row['after']  = $wanted;
+						$row['status'] = 'would_change';
+					} else {
+						$product->set_backorders( $wanted );
+						$product->save();
+						$row['after']  = $wanted;
+						$row['status'] = 'changed';
+						$purge[ $id ]  = $id;
+						$parent_id     = (int) $product->get_parent_id();
+						if ( $parent_id ) {
+							$purge[ $parent_id ] = $parent_id;
+						}
+					}
+				}
+			}
+
+			++$counts[ $row['status'] ];
+			$results[] = $row;
+		}
+
+		$output = [ 'dry_run' => $dry_run, 'counts' => $counts, 'items' => $results ];
+		if ( $purge ) {
+			$cache = self::clear_cache( [ 'scope' => 'posts', 'post_ids' => array_values( $purge ) ] );
+			$output['cache'] = is_wp_error( $cache ) ? [ 'cleared' => false, 'message' => $cache->message ] : $cache;
 		}
 		return $output;
 	}

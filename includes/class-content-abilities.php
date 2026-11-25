@@ -519,6 +519,10 @@ class CloseHub_Content_Abilities {
 		if ( $full ) {
 			$categories = is_object_in_taxonomy( $post->post_type, 'category' ) ? wp_get_post_categories( $post->ID, [ 'fields' => 'names' ] ) : [];
 			$data += [ 'content' => $post->post_content, 'content_hash' => hash( 'sha256', $post->post_content ), 'excerpt' => $post->post_excerpt, 'categories' => $categories ] + CloseHub_REST_API::cms_metadata( $post->ID );
+			if ( in_array( $post->post_type, [ 'product', 'product_variation' ], true ) && function_exists( 'wc_get_product' ) ) {
+				$product = wc_get_product( $post->ID );
+				if ( $product ) { $data['backorders'] = (string) $product->get_backorders(); }
+			}
 		}
 		return $data;
 	}

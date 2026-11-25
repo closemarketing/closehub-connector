@@ -60,6 +60,7 @@ $expected = [
 	'closehub/update-plugins-and-core',
 	'closehub/create-site-user',
 	'closehub/clear-cache',
+	'closehub/set-product-backorders',
 	'closehub/list-languages',
 	'closehub/add-language',
 	'closehub/set-default-language',
